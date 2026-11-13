@@ -19,3 +19,7 @@
 **/.codex/memory
 **/dist
 **/*.log
+
+**/data
+**/*.db*
+**/*.sqlite*

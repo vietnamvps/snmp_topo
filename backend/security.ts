@@ -1,11 +1,13 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { BlockList, isIP } from 'node:net';
 import { z } from 'zod';
 import type { Express } from 'express';
-import express from 'express';
+import { resolve } from 'node:path';
+import { projectRoot } from './configuration.js';
+import type { Accounts } from './accounts.js';
+import { mountAccountRoutes } from './account-routes.js';
 
-const sessionSeconds = 8 * 60 * 60;
 const cookieName = 'dashboard_session';
 const digest = (value: string) => createHash('sha256').update(value).digest();
 const equal = (left: string, right: string) => timingSafeEqual(digest(left), digest(right));
@@ -25,10 +27,10 @@ function isLanIp(hostname: string) {
   return version !== 0 && lanAddresses.check(address, version === 4 ? 'ipv4' : 'ipv6');
 }
 
-export function configureSecurity(app: Express, mock: boolean, host: string) {
+export function configureSecurity(app: Express, mock: boolean, host: string, accounts: Accounts) {
   const token = process.env.DASHBOARD_TOKEN ?? '';
-  if (!mock && !/^[A-Za-z0-9_-]{32,256}$/.test(token)) {
-    throw new Error('Live mode requires a random DASHBOARD_TOKEN (32–256 URL-safe characters)');
+  if (token && !/^[A-Za-z0-9_-]{32,256}$/.test(token)) {
+    throw new Error('Invalid DASHBOARD_TOKEN (32–256 URL-safe characters)');
   }
   const allowHttp = allowInsecureLanHttp.parse(process.env.ALLOW_INSECURE_LAN_HTTP);
   const configuredOrigin = process.env.DASHBOARD_ORIGIN;
@@ -54,9 +56,6 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
     console.warn('ALLOW_INSECURE_LAN_HTTP enabled: dashboard credentials and session traffic are unencrypted.');
   }
 
-  const sessionKey = randomBytes(32);
-  const signature = (expires: string) => createHmac('sha256', sessionKey).update(expires).digest('base64url');
-
   function originAllowed(request: IncomingMessage) {
     const { origin, host } = request.headers;
     if (!origin) return true;
@@ -65,16 +64,20 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
     return origin === 'http://' + host || origin === 'https://' + host;
   }
 
-  function authenticated(request: IncomingMessage) {
-    if (mock) return true;
-    const authorization = request.headers.authorization;
-    if (authorization?.startsWith('Bearer ') && equal(authorization.slice(7), token)) return true;
+  function sessionToken(request: IncomingMessage) {
     const cookie = request.headers.cookie?.split(';').map(part => part.trim())
       .find(part => part.startsWith(cookieName + '='));
     const value = cookie?.slice(cookieName.length + 1);
-    if (!value || !/^\d{10}\.[\w-]{43}$/.test(value)) return false;
-    const [expires, mac] = value.split('.');
-    return Number(expires) > Math.floor(Date.now() / 1000) && equal(mac, signature(expires));
+    return value && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : undefined;
+  }
+  function session(request: IncomingMessage) {
+    const value = sessionToken(request);
+    return value ? accounts.session(value) : undefined;
+  }
+  function authenticated(request: IncomingMessage) {
+    const authorization = request.headers.authorization;
+    return Boolean(mock || session(request) ||
+      (token && authorization?.startsWith('Bearer ') && equal(authorization.slice(7), token)));
   }
 
   app.use((request, response, next) => {
@@ -92,40 +95,9 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
     next();
   });
 
-  if (!mock) {
-    const loginForm = '<!doctype html><html lang="vi"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Đăng nhập dashboard</title><main><h1>Đăng nhập dashboard</h1><form method="post" action="/login"><label>Token quản trị <input name="token" type="password" autocomplete="current-password" required maxlength="256"></label> <button>Đăng nhập</button></form></main></html>';
-    let windowStart = Date.now();
-    let attempts = 0;
-
-    app.get('/login', (_request, response) => response.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'same-origin' }).send(loginForm));
-    app.post('/login', express.urlencoded({ extended: false, limit: '1kb', parameterLimit: 2 }), (request, response) => {
-      response.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'same-origin' });
-      if (!request.headers.origin || !originAllowed(request)) {
-        response.sendStatus(403);
-        return;
-      }
-      const now = Date.now();
-      if (now - windowStart >= 60_000) {
-        windowStart = now;
-        attempts = 0;
-      }
-      if (attempts >= 10) {
-        response.set('Retry-After', String(Math.ceil((60_000 - (now - windowStart)) / 1000))).sendStatus(429);
-        return;
-      }
-      const supplied = request.body?.token;
-      if (typeof supplied !== 'string' || !equal(supplied, token)) {
-        attempts += 1;
-        response.status(401).send(loginForm);
-        return;
-      }
-      const expires = String(Math.floor(now / 1000) + sessionSeconds);
-      response.cookie(cookieName, expires + '.' + signature(expires), {
-        httpOnly: true, secure: !(allowHttp && httpOrigin && request.headers.origin === configuredOrigin), sameSite: 'strict', maxAge: sessionSeconds * 1000, path: '/',
-      });
-      response.redirect(303, '/');
-    });
-  }
+  app.get('/login', (_request, response) => response
+    .set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'same-origin' })
+    .sendFile(resolve(projectRoot, 'frontend/dist/index.html')));
 
   let rateWindow = Date.now();
   let apiRequests = 0;
@@ -151,7 +123,16 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
         'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Device-Config',
       }).sendStatus(204);
-    } else if (!authenticated(request)) {
+    } else {
+      next();
+    }
+  });
+
+  mountAccountRoutes(app, accounts, cookieName, sessionToken, request =>
+    !(allowHttp && httpOrigin && request.headers.origin === configuredOrigin), originAllowed);
+
+  app.use('/api', (request, response, next) => {
+    if (!authenticated(request)) {
       response.status(401).json({ error: 'Cần đăng nhập.' });
     } else {
       if (request.headers.origin && allowedOrigins.has(request.headers.origin)) {
@@ -161,11 +142,16 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
     }
   });
 
-  app.get(['/', '/devices', '/index.html'], (request, response, next) => {
+  app.get(['/', '/devices', '/users', '/index.html'], (request, response, next) => {
     response.set('Cache-Control', 'no-store');
-    if (authenticated(request)) next();
+    if (mock || session(request)) next();
     else response.redirect('/login');
   });
 
-  return { authenticated, originAllowed, withinRateLimit };
+  function canManageDevices(request: IncomingMessage) {
+    const user = session(request);
+    return user ? user.role === 'admin' : authenticated(request);
+  }
+
+  return { authenticated, session, sessionToken, originAllowed, withinRateLimit, canManageDevices };
 }

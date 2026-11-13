@@ -2,9 +2,9 @@
 
 ## Chạy với mạng thật
 
-- Đặt `MOCK_MODE=false` và tạo token riêng cho dashboard bằng `node -p "require('node:crypto').randomBytes(32).toString('base64url')"`. Lưu vào `DASHBOARD_TOKEN` trong môi trường máy chủ hoặc tệp `.env` chỉ tài khoản dịch vụ đọc được. Dùng HTTPS qua reverse proxy tin cậy hoặc truy cập loopback qua SSH tunnel.
+- Đặt `MOCK_MODE=false` và tạo tài khoản quản trị từ ADMIN_USERNAME/ADMIN_PASSWORD. DASHBOARD_TOKEN chỉ dùng cho Bearer automation.
 - Giữ bind mặc định `127.0.0.1`. Khi dùng reverse proxy, đặt `DASHBOARD_ORIGIN` bằng đúng origin HTTPS bên ngoài, gồm cổng nếu có, và chuyển tiếp WebSocket. Giới hạn quyền truy cập trực tiếp cổng Node bằng firewall. Khi bind ngoài loopback ở chế độ thật, ứng dụng mặc định yêu cầu origin HTTPS. TLS do reverse proxy kết thúc.
-- Giao diện đăng nhập bằng token và nhận cookie HttpOnly, SameSite=Strict, hết hạn sau 8 giờ. Cookie có cờ Secure mặc định. Ngoại lệ chỉ áp dụng cho origin HTTP đã bật cờ LAN. Khởi động lại backend sẽ thu hồi các cookie đã cấp. API client có thể gửi `Authorization: Bearer <token>` cho REST và WebSocket. Token dùng chung cấp toàn quyền xem và sửa. Giới hạn truy cập dashboard cho quản trị viên được tin cậy.
+- Đăng nhập bằng tài khoản. SQLite lưu hash Argon2id của mật khẩu và SHA-256 của token phiên. Cookie HttpOnly, SameSite=Strict, Secure theo origin. Phiên mặc định 8 giờ hoặc 30 ngày khi ghi nhớ, và được thu hồi khi đổi mật khẩu hoặc vô hiệu hóa tài khoản. Bearer token dành cho API automation, không cấp quyền API quản lý tài khoản.
 - Mock dành cho dữ liệu mẫu, không yêu cầu đăng nhập. Nếu cần bật lại mock, dùng tệp thiết bị mẫu riêng để tránh công khai sơ đồ thật. Giới hạn egress của tiến trình tới các IP/cổng SNMP quản trị và endpoint Speedtest tin cậy nếu dùng.
 - Giữ `.env`, cấu hình thiết bị thật và log ngoài Git. Dữ liệu topology có thể tiết lộ IP, tên thiết bị và ánh xạ cổng. Nếu bí mật từng lọt vào lịch sử Git, xoay vòng bí mật và xử lý cả lịch sử trước khi công khai.
 
@@ -26,3 +26,5 @@ Dùng ALLOWED_ORIGINS để cho phép các origin cụ thể, phân tách bằng
 ## Trusted LAN over HTTP
 
 Set `ALLOW_INSECURE_LAN_HTTP=true` and set `DASHBOARD_ORIGIN` to the exact HTTP origin, including the published port. Use a private or loopback IP literal. Live mode still requires token authentication. Restrict access to trusted clients because HTTP sends credentials and telemetry without transport encryption.
+
+Giữ thư mục SQLite và bản sao lưu ngoài Git. Tài khoản dịch vụ cần quyền ghi riêng vào thư mục dữ liệu. Xóa biến bootstrap sau khi tạo admin. Chế độ mock giữ quyền xem và chỉnh thiết bị mẫu khi chưa đăng nhập.

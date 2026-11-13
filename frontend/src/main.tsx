@@ -1,3 +1,4 @@
+import { AccountMenu, LoginPage, UsersPage, accountRequest } from './accounts';
 import { LanguageProvider, LanguageSwitch, useLanguage, apiErrorKey } from './language';
 import { createRoot } from 'react-dom/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -52,6 +53,7 @@ function SystemBar({ snapshot, connected }: { snapshot?: Snapshot; connected: bo
       <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
     <time>{now.toLocaleTimeString(language, { hour12: false })}</time>
     <LanguageSwitch />
+    <AccountMenu />
     <button className="tool" type="button" aria-expanded={drawerOpen} aria-controls="noc-drawer"
       aria-label={t('drawer')} title={t('drawer')} onClick={() => setDrawerOpen(!drawerOpen)}><Settings size={18} /></button>
     {drawerOpen && <aside className="command-drawer" id="noc-drawer" aria-label={t('drawer')}>
@@ -107,6 +109,20 @@ function Dashboard() {
   const { snapshot, connected, error, refresh } = useTopology();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [positions, setPositions] = useState(loadLayout);
+  const layoutTouched = useRef(false);
+  const layoutWrites = useRef(Promise.resolve());
+  useEffect(() => {
+    let active = true;
+    void accountRequest('layout').then(async response => {
+      if (!response.ok) return;
+      const { layout } = await response.json();
+      if (active && !layoutTouched.current && layout !== null) {
+        fitRequested.current = true;
+        setPositions(parseLayout(JSON.stringify(layout)));
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
   const [dragging, setDragging] = useState<PositionMap>(new Map());
   const modifiers = useRef({ shiftKey: false, altKey: false });
   const dragSession = useRef<{ id: string; origin: Point; raw: Point; placed: Point; width: number; height: number }>();
@@ -243,6 +259,12 @@ function Dashboard() {
   }, [positions, flow]);
 
   function storeLayout(next: PositionMap) {
+    layoutTouched.current = true;
+    const layout = Object.fromEntries(next);
+    layoutWrites.current = layoutWrites.current.then(async () => {
+      const response = await accountRequest('layout', 'PUT', { layout });
+      if (!response.ok && response.status !== 401) setLayoutMessage(t('layoutSaveError'));
+    }).catch(() => setLayoutMessage(t('layoutSaveError')));
     setPositions(next);
     setLayoutMessage('');
     try {
@@ -488,5 +510,7 @@ function Dashboard() {
   );
 }
 
-createRoot(document.getElementById('root')!).render(<LanguageProvider>{window.location.pathname === '/devices'
+createRoot(document.getElementById('root')!).render(<LanguageProvider>{window.location.pathname === '/login' ? <LoginPage />
+  : window.location.pathname === '/users' ? <UsersPage />
+  : window.location.pathname === '/devices'
   ? <DeviceSettings /> : <ReactFlowProvider><Dashboard /></ReactFlowProvider>}</LanguageProvider>);

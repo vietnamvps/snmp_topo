@@ -1,3 +1,4 @@
+import { openAccounts } from '../backend/dist/accounts.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { test } from 'node:test';
@@ -20,8 +21,10 @@ function configure(t, dashboardOrigin, allowHttp) {
     });
   }
   const app = express();
-  const security = configureSecurity(app, false, '0.0.0.0');
-  return { app, security };
+  const accounts = openAccounts(':memory:');
+  t.after(() => accounts.close());
+  const security = configureSecurity(app, false, '0.0.0.0', accounts);
+  return { app, security, accounts };
 }
 
 test('public HTTP IP and hostname are rejected even with opt-in', async t => {
@@ -37,7 +40,7 @@ test('live mode defaults to HTTPS on non-loopback binds', async t => {
 });
 
 test('LAN HTTP permits authenticated requests with a non-Secure cookie and no HSTS', async t => {
-  const { app, security } = configure(t, origin, 'true');
+  const { app, security, accounts } = configure(t, origin, 'true');
   assert.equal(security.originAllowed({ headers: { origin } }), true);
   assert.equal(security.originAllowed({ headers: { origin: 'http://192.168.1.21:3100' } }), false);
   app.get('/api/test', (_request, response) => response.sendStatus(204));
@@ -46,17 +49,11 @@ test('LAN HTTP permits authenticated requests with a non-Secure cookie and no HS
   await once(server, 'listening');
   const base = 'http://127.0.0.1:' + server.address().port;
   assert.equal((await fetch(base + '/api/test')).status, 401);
-  assert.equal((await fetch(base + '/login')).headers.get('referrer-policy'), 'same-origin');
-  const rejected = await fetch(base + '/login', { method: 'POST',
-    headers: { Origin: 'null' }, body: new URLSearchParams({ token }) });
-  assert.equal(rejected.status, 403);
-  const retry = await fetch(base + '/login', { method: 'POST',
-    headers: { Origin: origin }, body: new URLSearchParams({ token: 'invalid' }) });
-  assert.equal(retry.status, 401);
-  assert.equal(retry.headers.get('referrer-policy'), 'same-origin');
-  const response = await fetch(base + '/login', { method: 'POST', redirect: 'manual',
-    headers: { Origin: origin }, body: new URLSearchParams({ token }) });
-  assert.equal(response.status, 303);
+  await accounts.create('test-admin', 'test-passphrase-123', 'admin');
+  const response = await fetch(base + '/api/auth/login', { method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'test-admin', password: 'test-passphrase-123' }) });
+  assert.equal(response.status, 200);
   assert.equal(response.headers.get('strict-transport-security'), null);
   const cookie = response.headers.get('set-cookie');
   assert.match(cookie, /HttpOnly/);

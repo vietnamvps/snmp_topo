@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import express from 'express';
 import { WebSocket, WebSocketServer } from 'ws';
 import { DeviceConfigError, loadDevices, projectRoot, saveDevices } from './configuration.js';
+import { openAccounts } from './accounts.js';
 import { configureSecurity } from './security.js';
 import { pollSnmp, probeSnmp, type Sample } from './snmp.js';
 import { buildTopology, type Speedtest, type TrafficHistory } from './topology.js';
@@ -37,13 +38,22 @@ const shutdown = new AbortController();
 
 const app = express();
 app.disable('x-powered-by');
-const security = configureSecurity(app, mock, host);
+const accounts = openAccounts();
+const security = configureSecurity(app, mock, host, accounts);
+await accounts.bootstrap();
+if (!mock && !accounts.hasUsers()) console.warn('No accounts configured. Set ADMIN_USERNAME and ADMIN_PASSWORD or run user:create.');
+accounts.prune();
+const cleanupTimer = setInterval(() => accounts.prune(), 60_000).unref();
 app.get('/healthz', (_request, response) => response.json({ status: 'ok' }));
 app.get('/api/topology', (_request, response) => response.set('Cache-Control', 'no-store').json(snapshot));
 app.get('/api/device-config', (_request, response) => {
   response.set('Cache-Control', 'no-store').json({ devices, revision });
 });
 app.put('/api/device-config', express.json({ limit: '256kb' }), (request, response) => {
+  if (!security.canManageDevices(request)) {
+    response.sendStatus(403);
+    return;
+  }
   if (process.env.DEVICES_READ_ONLY === 'true') {
     response.status(403).json({ error: 'Cấu hình được gắn chỉ đọc. Sửa tệp trên máy chủ rồi khởi động lại dịch vụ.' });
     return;
@@ -115,7 +125,7 @@ app.post('/api/devices/:id/probe', async (request, response) => {
 });
 
 app.use(express.static(resolve(projectRoot, 'frontend/dist')));
-app.get('/devices', (_request, response) => response.sendFile(resolve(projectRoot, 'frontend/dist/index.html')));
+app.get(['/devices', '/users'], (_request, response) => response.sendFile(resolve(projectRoot, 'frontend/dist/index.html')));
 app.use((error: { status?: number }, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   const status = error.status === 413 ? 413 : error.status === 400 ? 400 : 500;
   response.status(status).json({ error: 'Không xử lý được yêu cầu.' });
@@ -127,14 +137,27 @@ server.on('upgrade', (request, socket, head) => {
   const status = request.url !== '/ws/topology' ? '404 Not Found'
     : !security.originAllowed(request) ? '403 Forbidden'
     : !security.withinRateLimit('ws') ? '429 Too Many Requests'
-    : !security.authenticated(request) ? '401 Unauthorized' : null;
+    : !mock && !security.session(request) ? '401 Unauthorized' : null;
   if (status) {
     socket.end('HTTP/1.1 ' + status + '\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
     return;
   }
   streams.handleUpgrade(request, socket, head, client => streams.emit('connection', client, request));
 });
-streams.on('connection', client => {
+streams.on('connection', (client, request) => {
+  if (!mock) {
+    const check = () => {
+      const session = security.session(request);
+      if (!session) {
+        client.close(4401, 'Session expired');
+        return;
+      }
+      timer = setTimeout(check, Math.min(1000, Math.max(1, session.expires_at - Date.now())));
+    };
+    let timer: NodeJS.Timeout;
+    client.once('close', () => clearTimeout(timer));
+    check();
+  }
   client.on('error', () => client.terminate());
   client.send(JSON.stringify(snapshot));
 });
@@ -213,7 +236,8 @@ function stop() {
   shutdown.abort();
   for (const client of streams.clients) client.terminate();
   streams.close();
-  server.close();
+  clearInterval(cleanupTimer);
+  server.close(() => accounts.close());
 }
 
 const speedtestUrl = mock ? undefined : process.env.SPEEDTEST_URL;

@@ -12,3 +12,7 @@ dist/
 *.log
 logs/
 .antigravity/
+
+/data/
+*.db*
+*.sqlite*

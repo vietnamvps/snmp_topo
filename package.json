@@ -3,16 +3,24 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=26.0.0" },
-  "workspaces": ["frontend"],
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
     "build": "tsc -p backend/tsconfig.json && npm run build --workspace frontend",
     "dev": "npm start",
-    "test": "tsc -p backend/tsconfig.json && node --test tests/security.test.mjs",
+    "test": "tsc -p backend/tsconfig.json && node --test tests/*.test.mjs",
+    "user:create": "node --env-file-if-exists=.env backend/dist/user-cli.js create",
+    "user:passwd": "node --env-file-if-exists=.env backend/dist/user-cli.js passwd",
+    "user:disable": "node --env-file-if-exists=.env backend/dist/user-cli.js disable",
     "prestart": "npm run build",
     "start": "node --env-file-if-exists=.env backend/dist/main.js"
   },
   "dependencies": {
+    "better-sqlite3": "^13.1.1",
     "express": "^5.1.0",
     "net-snmp": "^3.26.0",
     "ws": "^8.18.0",
@@ -20,6 +28,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.0",
     "@types/net-snmp": "^3.23.0",
     "@types/node": "^26.0.0",
