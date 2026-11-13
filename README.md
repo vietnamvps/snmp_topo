@@ -65,3 +65,15 @@ Compose publishes port 3000 on loopback by default. `PORT` in `.env` overrides t
 ## Security
 
 Keep the dashboard on loopback or a trusted management network. Use an SSH tunnel or an HTTPS reverse proxy for remote access. Treat `.env` and `config/devices.yaml` as deployment data. See [SECURITY.md](SECURITY.md) for authentication, origin controls, and firewall rules.
+
+### Run the published image
+
+Create the local configuration files as above, set `PORT=3100` in `.env` if port 3000 is already in use, and run:
+
+```sh
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+docker compose -f docker-compose.ghcr.yml ps
+```
+
+The GitHub Actions workflow publishes a Linux AMD64 image to GHCR with a moving `latest` tag and a commit-specific `sha-<full-commit>` tag. After the first publication, the package owner can set visibility to Public to allow anonymous pulls. For a private package, authenticate to `ghcr.io` with a credential that has package read access.
