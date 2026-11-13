@@ -46,6 +46,14 @@ test('LAN HTTP permits authenticated requests with a non-Secure cookie and no HS
   await once(server, 'listening');
   const base = 'http://127.0.0.1:' + server.address().port;
   assert.equal((await fetch(base + '/api/test')).status, 401);
+  assert.equal((await fetch(base + '/login')).headers.get('referrer-policy'), 'same-origin');
+  const rejected = await fetch(base + '/login', { method: 'POST',
+    headers: { Origin: 'null' }, body: new URLSearchParams({ token }) });
+  assert.equal(rejected.status, 403);
+  const retry = await fetch(base + '/login', { method: 'POST',
+    headers: { Origin: origin }, body: new URLSearchParams({ token: 'invalid' }) });
+  assert.equal(retry.status, 401);
+  assert.equal(retry.headers.get('referrer-policy'), 'same-origin');
   const response = await fetch(base + '/login', { method: 'POST', redirect: 'manual',
     headers: { Origin: origin }, body: new URLSearchParams({ token }) });
   assert.equal(response.status, 303);

@@ -97,9 +97,9 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
     let windowStart = Date.now();
     let attempts = 0;
 
-    app.get('/login', (_request, response) => response.set('Cache-Control', 'no-store').send(loginForm));
+    app.get('/login', (_request, response) => response.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'same-origin' }).send(loginForm));
     app.post('/login', express.urlencoded({ extended: false, limit: '1kb', parameterLimit: 2 }), (request, response) => {
-      response.set('Cache-Control', 'no-store');
+      response.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'same-origin' });
       if (!request.headers.origin || !originAllowed(request)) {
         response.sendStatus(403);
         return;
