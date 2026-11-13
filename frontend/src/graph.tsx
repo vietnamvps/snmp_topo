@@ -1,5 +1,7 @@
-import { BaseEdge, EdgeLabelRenderer, Handle, Position, getBezierPath } from '@xyflow/react';
-import type { Edge, EdgeProps, Node, NodeProps } from '@xyflow/react';
+import { createContext, memo, useContext } from 'react';
+import dagre from '@dagrejs/dagre';
+import { BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, getBezierPath, useInternalNode } from '@xyflow/react';
+import type { Edge, EdgeProps, InternalNode, Node, NodeProps } from '@xyflow/react';
 import { Camera, Database, Globe2, House, Minus, Network, Plus, Router, Server, Shield, Wifi } from 'lucide-react';
 import type { Device, Kind } from './data';
 import { rate } from './data';
@@ -26,37 +28,69 @@ export type TopologyNode = Node<{
   matched: boolean;
 }, 'device'>;
 
-export type TopologyEdge = Edge<{ device: Device; labels: boolean }, 'traffic'>;
+export type TopologyEdge = Edge<{ device: Device; labels: boolean; trunk: boolean }, 'traffic'>;
 
-export function DeviceCard({ data }: NodeProps<TopologyNode>) {
+export const bladeWidth = 228;
+export const bladeHeight = 118;
+
+function Sparkline({ history }: { history: (number | null)[] }) {
+  const scale = Math.max(1, ...history.map(value => value ?? 0));
+  let penDown = false;
+  const path = history.map((value, i) => {
+    if (value == null) {
+      penDown = false;
+      return '';
+    }
+    const command = penDown ? 'L' : 'M';
+    penDown = true;
+    return command + ((15 - history.length + i) * 5 + 2) + ' ' + (23 - 20 * value / scale);
+  }).join(' ');
+  return <svg className="blade-spark" viewBox="0 0 74 26" role="img" aria-label="Lưu lượng 15 nhịp gần nhất">
+    <path d="M2 23H72 M2 13H72 M2 3H72" className="spark-grid" />
+    <path d={path} className="spark-line" />
+  </svg>;
+}
+
+const anchorSides = [Position.Top, Position.Bottom, Position.Left, Position.Right];
+
+export const TopologyHoverContext = createContext<{
+  focused?: string; related: ReadonlySet<string | undefined>; dragged?: string;
+}>({ related: new Set() });
+
+export const DeviceCard = memo(function DeviceCard({ id, data }: NodeProps<TopologyNode>) {
+  const { focused, related } = useContext(TopologyHoverContext);
+  const muted = focused && !related.has(id) ? ' topology-muted' : '';
   const { device, children, collapsed, toggle, matched } = data;
   const [kind, Icon] = kinds[device.kind];
-  const color = device.status === 'online' && ['wan', 'core', 'switch'].includes(device.kind) ? 'core' : device.status;
+  const color = device.status === 'online' && ['firewall', 'core'].includes(device.kind) ? 'core' : device.status;
   return (
-    <article tabIndex={0} aria-label={`Thao tác cho ${device.name}`}
-      onKeyDown={event => {
-        if (event.target !== event.currentTarget || !['Enter', ' '].includes(event.key)) return;
-        event.preventDefault();
-        event.currentTarget.click();
-      }} className={`device-card ${color} ${matched ? 'matched' : ''}`}>
-      {device.parent_id && <Handle type="target" position={Position.Left} isConnectable={false} />}
-      {children > 0 && !collapsed && <Handle type="source" position={Position.Right} isConnectable={false} />}
+    <article className={`device-card ${color} ${matched ? 'matched' : ''}${muted}`}>
+      {anchorSides.map(side => (
+        <Handle key={'target-' + side} id={'target-' + side} type="target" position={side} isConnectable={false} />
+      ))}
+      {anchorSides.map(side => (
+        <Handle key={'source-' + side} id={'source-' + side} type="source" position={side} isConnectable={false} />
+      ))}
       <div className="device-heading">
         <span className="device-icon"><Icon size={19} /></span>
         <div className="device-title">
           <div className="device-kind">{kind}</div>
           <strong title={device.name}>{device.name}</strong>
         </div>
-        <span className="device-dot" aria-label={statusNames[device.status]} title={statusNames[device.status]} />
+        <span className="blade-state" title={statusNames[device.status]}>
+          {{ online: 'UP', offline: 'DOWN', warning: 'LOAD', unknown: '—' }[device.status]}
+        </span>
       </div>
       <div className="device-meta">
-        <span>{device.ip}</span>
-        {device.host?.cpu_percent != null && <span>CPU {device.host.cpu_percent}%</span>}
-        {device.host?.ram_percent != null && <span>RAM {device.host.ram_percent}%</span>}
+        <span title={device.ip}>{device.ip}</span>
+        <span title={device.uplink ? (device.uplink.name ?? 'ifIndex ' + device.uplink.index) + (device.uplink.capacity_bps ? ' · ' + rate(device.uplink.capacity_bps) : '') : undefined}>
+          {device.uplink ? '↥ ' + (device.uplink.name ?? '#' + device.uplink.index) + (device.uplink.capacity_bps ? ' · ' + rate(device.uplink.capacity_bps) : '') : '↥ —'}
+        </span>
       </div>
       <div className="device-rates">
-        <span className="down">↓ {rate(device.down_bps)}</span>
-        <span className="up">↑ {rate(device.up_bps)}</span>
+        <div><span className="down">▼ {rate(device.down_bps)}</span>
+          <span className="up">▲ {rate(device.up_bps)}</span></div>
+        <Sparkline history={device.traffic_history ?? []} />
       </div>
       {children > 0 && <button className="branch nodrag nopan" type="button" onClick={event => { event.stopPropagation(); toggle(device.id); }}
         aria-label={`${collapsed ? 'Mở' : 'Thu gọn'} nhánh ${device.name}`} aria-expanded={!collapsed}>
@@ -64,57 +98,117 @@ export function DeviceCard({ data }: NodeProps<TopologyNode>) {
       </button>}
     </article>
   );
+});
+
+function nodeBounds(node: InternalNode<TopologyNode>) {
+  const { x, y } = node.internals.positionAbsolute;
+  const width = node.measured.width ?? node.width ?? bladeWidth;
+  const height = node.measured.height ?? node.height ?? bladeHeight;
+  return { centerX: x + width / 2, centerY: y + height / 2, width, height };
 }
 
-export function TrafficEdge({ id, data, ...props }: EdgeProps<TopologyEdge>) {
-  const [path, x, y] = getBezierPath(props);
-  if (!data) return null;
-  const { device, labels } = data;
-  const active = device.status === 'online' || device.status === 'warning';
+function smartAnchors(source: InternalNode<TopologyNode>, target: InternalNode<TopologyNode>) {
+  const a = nodeBounds(source);
+  const b = nodeBounds(target);
+  const dx = b.centerX - a.centerX;
+  const dy = b.centerY - a.centerY;
+  const deltaX = Math.abs(dx);
+  const deltaY = Math.abs(dy);
+  const horizontal = deltaX > deltaY;
+  const direction = (horizontal ? dx : dy) >= 0 ? 1 : -1;
+
+  if (horizontal) {
+    const sourceX = a.centerX + direction * a.width / 2;
+    const targetX = b.centerX - direction * b.width / 2;
+    return {
+      sourceX, targetX,
+      sourceY: a.centerY,
+      targetY: b.centerY,
+      sourcePosition: direction > 0 ? Position.Right : Position.Left,
+      targetPosition: direction > 0 ? Position.Left : Position.Right,
+    };
+  }
+
+  const sourceY = a.centerY + direction * a.height / 2;
+  const targetY = b.centerY - direction * b.height / 2;
+  return {
+    sourceY, targetY,
+    sourceX: a.centerX,
+    targetX: b.centerX,
+    sourcePosition: direction > 0 ? Position.Bottom : Position.Top,
+    targetPosition: direction > 0 ? Position.Top : Position.Bottom,
+  };
+}
+
+export const TrafficEdge = memo(function TrafficEdge({ id, source, target, markerEnd, data }: EdgeProps<TopologyEdge>) {
+  const { focused, dragged } = useContext(TopologyHoverContext);
+  const sourceNode = useInternalNode<TopologyNode>(source);
+  const targetNode = useInternalNode<TopologyNode>(target);
+  if (!data || !sourceNode || !targetNode) return null;
+  const { device, labels, trunk } = data;
+  const highlighted = source === focused || target === focused;
+  const dimmed = focused && !highlighted ? ' topology-muted' : '';
+  const anchors = smartAnchors(sourceNode, targetNode);
+  const [path, labelX, labelY] = getBezierPath({
+    ...anchors,
+    curvature: 0.22,
+  });
+  const active = (device.down_bps ?? 0) + (device.up_bps ?? 0) > 100_000;
   return (
     <>
-      <BaseEdge id={id} path={path} className={`traffic-line ${device.status}`} />
-      {active && <path d={path} className="traffic-particles" />}
-      {labels && <EdgeLabelRenderer>
-        <div className="edge-label" style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} className={`traffic-line ${device.status} ${trunk ? 'trunk' : ''} ${highlighted ? 'highlighted' : ''}${dimmed}`} />
+      <circle cx={anchors.sourceX} cy={anchors.sourceY} r={3} className={`traffic-anchor${dimmed}`} />
+      <circle cx={anchors.targetX} cy={anchors.targetY} r={3} className={`traffic-anchor${dimmed}`} />
+      {active && <path d={path} className={`traffic-particles${dimmed}`} />}
+      {labels && (!dragged || source === dragged || target === dragged) && <EdgeLabelRenderer>
+        <div className={`edge-label${dimmed}`} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>
           <span className="down">↓ {rate(device.down_bps, true)}</span>
           <span className="up">↑ {rate(device.up_bps, true)}</span>
         </div>
       </EdgeLabelRenderer>}
     </>
   );
-}
+});
 
 export function makeGraph(
-  devices: Device[], collapsed: Set<string>, toggle: (id: string) => void, labels: boolean, query: string,
+  devices: Pick<Device, 'id' | 'parent_id' | 'name' | 'ip' | 'kind'>[], collapsed: Set<string>, toggle: (id: string) => void, labels: boolean, query: string,
 ) {
   const nodes: TopologyNode[] = [];
   const edges: TopologyEdge[] = [];
-  const children = new Map<string | null, Device[]>();
+  const children = new Map<string | null, typeof devices>();
   for (const device of devices) {
     const group = children.get(device.parent_id) ?? [];
     group.push(device);
     children.set(device.parent_id, group);
   }
 
-  let row = 0;
-  function place(device: Device, depth: number): number {
+  const layout = new dagre.graphlib.Graph();
+  layout.setGraph({ rankdir: 'TB', nodesep: 34, ranksep: 76, marginx: 24, marginy: 24 });
+  layout.setDefaultEdgeLabel(() => ({}));
+  function place(device: typeof devices[number]) {
     const branches = children.get(device.id) ?? [];
     const closed = collapsed.has(device.id);
-    const childRows = closed ? [] : branches.map(child => place(child, depth + 1));
-    const y = childRows.length ? (childRows[0] + childRows[childRows.length - 1]) / 2 : row++ * 125;
+    layout.setNode(device.id, { width: bladeWidth, height: bladeHeight });
+    const initialDevice: Device = { ...device, status: 'unknown', down_bps: null, up_bps: null, host: null };
     nodes.push({
-      id: device.id, type: 'device', position: { x: depth * 365, y },
+      id: device.id, type: 'device', position: { x: 0, y: 0 }, zIndex: 10,
       data: {
-        device, collapsed: closed, toggle, children: branches.length,
+        device: initialDevice, collapsed: closed, toggle, children: branches.length,
         matched: Boolean(query && `${device.name} ${device.ip}`.toLocaleLowerCase().includes(query)),
       },
     });
     if (device.parent_id) {
-      edges.push({ id: `${device.parent_id}:${device.id}`, source: device.parent_id, target: device.id, type: 'traffic', data: { device, labels } });
+      const trunk = ['firewall', 'core', 'switch'].includes(device.kind);
+      edges.push({ zIndex: 1, markerEnd: trunk ? { type: MarkerType.ArrowClosed, color: '#67a9cf' } : undefined, id: `${device.parent_id}:${device.id}`, source: device.parent_id, target: device.id, sourceHandle: 'source-bottom', targetHandle: 'target-top', type: 'traffic', data: { device: initialDevice, labels, trunk } });
     }
-    return y;
+    if (device.parent_id) layout.setEdge(device.parent_id, device.id);
+    if (!closed) branches.forEach(place);
   }
-  for (const root of children.get(null) ?? []) place(root, 0);
+  (children.get(null) ?? []).forEach(place);
+  if (nodes.length) dagre.layout(layout);
+  for (const node of nodes) {
+    const { x, y } = layout.node(node.id);
+    node.position = { x: x - bladeWidth / 2, y: y - bladeHeight / 2 };
+  }
   return { nodes, edges };
 }

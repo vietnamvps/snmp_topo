@@ -14,10 +14,12 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
     throw new Error('Live mode requires a random DASHBOARD_TOKEN (32–256 URL-safe characters)');
   }
   const configuredOrigin = process.env.DASHBOARD_ORIGIN;
-  if (configuredOrigin) {
-    const url = new URL(configuredOrigin);
-    if (url.origin !== configuredOrigin || !['http:', 'https:'].includes(url.protocol)) {
-      throw new Error('DASHBOARD_ORIGIN must be an exact HTTP(S) origin');
+  const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean));
+  if (configuredOrigin) allowedOrigins.add(configuredOrigin);
+  for (const origin of allowedOrigins) {
+    const url = new URL(origin);
+    if (url.origin !== origin || !['http:', 'https:'].includes(url.protocol)) {
+      throw new Error('Allowed origins must be exact HTTP(S) origins');
     }
   }
 
@@ -31,7 +33,8 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
   function originAllowed(request: IncomingMessage) {
     const { origin, host } = request.headers;
     if (!origin) return true;
-    if (configuredOrigin) return origin === configuredOrigin;
+    if (allowedOrigins.has(origin)) return true;
+    if (configuredOrigin) return false;
     return origin === 'http://' + host || origin === 'https://' + host;
   }
 
@@ -90,7 +93,7 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
         return;
       }
       const expires = String(Math.floor(now / 1000) + sessionSeconds);
-      const loopbackHttp = !configuredOrigin && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(request.headers.origin);
+      const loopbackHttp = !configuredOrigin && /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(request.headers.origin);
       response.cookie(cookieName, expires + '.' + signature(expires), {
         httpOnly: true, secure: !loopbackHttp, sameSite: 'strict', maxAge: sessionSeconds * 1000, path: '/',
       });
@@ -98,13 +101,36 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
     });
   }
 
+  let rateWindow = Date.now();
+  let apiRequests = 0;
+  let upgrades = 0;
+  function withinRateLimit(kind: 'api' | 'ws') {
+    const now = Date.now();
+    if (now - rateWindow >= 60_000) {
+      rateWindow = now;
+      apiRequests = upgrades = 0;
+    }
+    return kind === 'api' ? ++apiRequests <= 1200 : ++upgrades <= 240;
+  }
+
   app.use('/api', (request, response, next) => {
     response.set('Cache-Control', 'no-store');
     if (!originAllowed(request)) {
       response.status(403).json({ error: 'Origin không hợp lệ.' });
+    } else if (!withinRateLimit('api')) {
+      response.set('Retry-After', '60').status(429).json({ error: 'Quá nhiều yêu cầu.' });
+    } else if (request.method === 'OPTIONS' && request.headers.origin && allowedOrigins.has(request.headers.origin)) {
+      response.vary('Origin').set({
+        'Access-Control-Allow-Origin': request.headers.origin,
+        'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Device-Config',
+      }).sendStatus(204);
     } else if (!authenticated(request)) {
       response.status(401).json({ error: 'Cần đăng nhập.' });
     } else {
+      if (request.headers.origin && allowedOrigins.has(request.headers.origin)) {
+        response.vary('Origin').set('Access-Control-Allow-Origin', request.headers.origin);
+      }
       next();
     }
   });
@@ -115,5 +141,5 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
     else response.redirect('/login');
   });
 
-  return { authenticated, originAllowed };
+  return { authenticated, originAllowed, withinRateLimit };
 }

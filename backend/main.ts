@@ -5,8 +5,8 @@ import express from 'express';
 import { WebSocket, WebSocketServer } from 'ws';
 import { DeviceConfigError, loadDevices, projectRoot, saveDevices } from './configuration.js';
 import { configureSecurity } from './security.js';
-import { pollSnmp, type Sample } from './snmp.js';
-import { buildTopology, type Speedtest } from './topology.js';
+import { pollSnmp, probeSnmp, type Sample } from './snmp.js';
+import { buildTopology, type Speedtest, type TrafficHistory } from './topology.js';
 
 function envNumber(name: string, fallback: number, minimum: number) {
   const value = Number(process.env[name] || fallback);
@@ -19,15 +19,18 @@ let revision = randomUUID();
 const mock = (process.env.MOCK_MODE ?? 'true').trim().toLowerCase() === 'true';
 const interval = envNumber('POLL_INTERVAL', 3, 0.5) * 1000;
 const host = process.env.HOST || process.env.DASHBOARD_HOST || '127.0.0.1';
-const port = Number(process.env.PORT || process.env.DASHBOARD_PORT || 8080);
+const port = Number(process.env.PORT || process.env.DASHBOARD_PORT || (process.env.NODE_ENV === 'production' ? 3000 : 8080));
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT or DASHBOARD_PORT');
 
 let speedtest: Speedtest | null = null;
 let previous = new Map<string, Sample>();
 const metadataCache = new Map<string, Pick<Sample['tables'], 'name' | 'lldp'>>();
+const history: TrafficHistory = new Map();
 let snapshot = buildTopology(devices, previous, previous, mock, speedtest);
 let cycle = 0;
 let stopped = false;
+let activePoll: Promise<void> | undefined;
+const activeProbes = new Set<string>();
 let pollTimer: NodeJS.Timeout | undefined;
 let speedtestTimer: NodeJS.Timeout | undefined;
 const shutdown = new AbortController();
@@ -41,6 +44,10 @@ app.get('/api/device-config', (_request, response) => {
   response.set('Cache-Control', 'no-store').json({ devices, revision });
 });
 app.put('/api/device-config', express.json({ limit: '256kb' }), (request, response) => {
+  if (process.env.DEVICES_READ_ONLY === 'true') {
+    response.status(403).json({ error: 'Cấu hình được gắn chỉ đọc. Sửa tệp trên máy chủ rồi khởi động lại dịch vụ.' });
+    return;
+  }
   if (!request.is('application/json') || request.get('X-Device-Config') !== '1') {
     response.status(415).json({ error: 'Yêu cầu lưu cấu hình không hợp lệ.' });
     return;
@@ -62,10 +69,51 @@ app.put('/api/device-config', express.json({ limit: '256kb' }), (request, respon
   }
   revision = randomUUID();
   previous.clear();
+  history.clear();
   metadataCache.clear();
-  publish(new Map());
+  publish(new Map(), false);
   response.json({ devices, revision });
 });
+app.post('/api/poll', async (request, response) => {
+  if (request.get('X-Device-Config') !== '1') {
+    response.sendStatus(403);
+    return;
+  }
+  await requestPoll();
+  response.json(snapshot);
+});
+
+app.post('/api/devices/:id/probe', async (request, response) => {
+  if (request.get('X-Device-Config') !== '1') {
+    response.sendStatus(403);
+    return;
+  }
+  const device = devices.find(item => item.id === request.params.id);
+  if (!device) {
+    response.sendStatus(404);
+    return;
+  }
+  if (mock) {
+    response.json({ mock: true, status: snapshot.devices.find(item => item.id === device.id)?.status ?? 'unknown' });
+    return;
+  }
+  if (!device.snmp) {
+    response.status(422).json({ error: 'Thiết bị chưa bật SNMP trong cấu hình.' });
+    return;
+  }
+  if (activeProbes.has(device.id) || activeProbes.size >= 8) {
+    response.status(429).json({ error: 'Đang kiểm tra SNMP. Hãy thử lại sau.' });
+    return;
+  }
+  activeProbes.add(device.id);
+  try {
+    const online = await probeSnmp(device).catch(() => false);
+    response.json({ mock: false, status: online ? 'online' : 'offline' });
+  } finally {
+    activeProbes.delete(device.id);
+  }
+});
+
 app.use(express.static(resolve(projectRoot, 'frontend/dist')));
 app.get('/devices', (_request, response) => response.sendFile(resolve(projectRoot, 'frontend/dist/index.html')));
 app.use((error: { status?: number }, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
@@ -78,6 +126,7 @@ const streams = new WebSocketServer({ noServer: true, maxPayload: 1024 });
 server.on('upgrade', (request, socket, head) => {
   const status = request.url !== '/ws/topology' ? '404 Not Found'
     : !security.originAllowed(request) ? '403 Forbidden'
+    : !security.withinRateLimit('ws') ? '429 Too Many Requests'
     : !security.authenticated(request) ? '401 Unauthorized' : null;
   if (status) {
     socket.end('HTTP/1.1 ' + status + '\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
@@ -90,6 +139,13 @@ streams.on('connection', client => {
   client.send(JSON.stringify(snapshot));
 });
 
+function requestPoll() {
+  if (activePoll) return activePoll;
+  clearTimeout(pollTimer);
+  activePoll = runPoller().finally(() => { activePoll = undefined; });
+  return activePoll;
+}
+
 async function runPoller() {
   const pollRevision = revision;
   const managed = devices.filter(device => device.snmp);
@@ -100,7 +156,7 @@ async function runPoller() {
       pollSnmp(device, cycle % 20 === 0 || !metadataCache.has(device.id))));
     if (stopped) return;
     if (pollRevision !== revision) {
-      pollTimer = setTimeout(runPoller, 0);
+      pollTimer = setTimeout(requestPoll, 0);
       return;
     }
     results.forEach((result, index) => {
@@ -122,11 +178,11 @@ async function runPoller() {
   if (stopped) return;
   publish(samples);
   cycle += 1;
-  pollTimer = setTimeout(runPoller, Math.max(0, interval - (performance.now() - start)));
+  pollTimer = setTimeout(requestPoll, Math.max(0, interval - (performance.now() - start)));
 }
 
-function publish(samples: Map<string, Sample>) {
-  snapshot = buildTopology(devices, samples, previous, mock, speedtest);
+function publish(samples: Map<string, Sample>, record = true) {
+  snapshot = buildTopology(devices, samples, previous, mock, speedtest, history, record);
   previous = samples;
   const payload = JSON.stringify(snapshot);
   for (const client of streams.clients) {
@@ -166,6 +222,6 @@ process.once('SIGINT', stop);
 process.once('SIGTERM', stop);
 server.listen(port, host, () => {
   console.log(`Dashboard listening on ${host}:${port} (mock: ${mock})`);
-  void runPoller();
+  void requestPoll();
   if (speedtestUrl) void updateSpeedtest(speedtestUrl, speedtestInterval);
 });

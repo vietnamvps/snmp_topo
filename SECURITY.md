@@ -10,7 +10,7 @@
 
 ## OPNsense
 
-1. Bật Net-SNMP và giới hạn Listen ở địa chỉ quản trị. Tạo user SNMPv3 **chỉ đọc** với `authPriv`, AES-128 và SHA-256 hoặc SHA-1 khớp thiết bị. Lưu cả hai khóa trên máy chạy poller. Nếu dùng v2c, dùng community chỉ đọc riêng và giới hạn trong mạng quản trị.
+1. Bật Net-SNMP và giới hạn Listen ở địa chỉ quản trị. Tạo user SNMPv3 **chỉ đọc** với `authPriv`, AES-128 hoặc AES-256 Blumenthal/Reeder và SHA-256, SHA-512 hoặc SHA-1 khớp thiết bị. Lưu cả hai khóa trên máy chạy poller. Nếu dùng v2c, dùng community chỉ đọc riêng và giới hạn trong mạng quản trị.
 2. Trên interface nhận lưu lượng từ poller, tạo rule **Pass**, hướng In, Quick, UDP. Source là đúng IP máy poller (/32 IPv4 hoặc /128 IPv6), destination là đúng IP quản trị OPNsense, destination port 161.
 3. Ngay dưới rule Pass, tạo rule **Block**, In, Quick, UDP, source any, cùng destination và cổng 161. Đặt hai rule trước rule LAN/VLAN cho phép rộng. Kiểm tra rule Floating và nhóm interface có thứ tự ưu tiên cao hơn. Với các interface khác có thể tiếp cận IP quản trị, chặn UDP 161 hoặc xác nhận default deny có hiệu lực. Giữ WAN không có rule pass hoặc port forward SNMP.
 4. Áp dụng, kiểm tra bằng SNMP GET từ IP poller và từ một IP khác. IP poller phải đọc được uptime, nguồn còn lại phải bị chặn. Có thể bật logging cho rule block để kiểm tra.
@@ -20,3 +20,5 @@ Xem [thứ tự xử lý rule OPNsense](https://docs.opnsense.org/manual/firewal
 ## Báo lỗi bảo mật
 
 Báo riêng cho người quản trị triển khai. Kèm phiên bản, cách tái hiện và ảnh hưởng. Xóa token, community, khóa và địa chỉ mạng thật khỏi nội dung gửi.
+
+Dùng ALLOWED_ORIGINS để cho phép các origin cụ thể, phân tách bằng dấu phẩy. CORS API liên origin hỗ trợ Bearer token. Giới hạn toàn tiến trình là 1.200 yêu cầu API và 240 lần nâng cấp WebSocket mỗi phút. Payload WebSocket đầu vào tối đa 1 KiB.

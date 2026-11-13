@@ -18,8 +18,9 @@ type Device = {
   username?: string | null;
   community_env: string;
   auth_env: string;
-  auth_protocol?: 'sha' | 'sha256';
+  auth_protocol?: 'sha' | 'sha256' | 'sha512';
   privacy_env: string;
+  privacy_protocol?: 'aes' | 'aes256b' | 'aes256r';
 };
 
 type Config = { devices: Device[]; revision: string };
@@ -58,12 +59,21 @@ async function requestConfig(options: RequestInit = {}): Promise<Config> {
 
 type SettingsProps = {
   nodeId?: string;
-  mode?: 'edit' | 'delete';
-  onSaved?: () => void;
+  mode?: 'edit' | 'delete' | 'add';
+  parentId?: string;
+  onSaved?: (id: string) => void;
   onStateChange?: (dirty: boolean, busy: boolean) => void;
 };
 
-export function DeviceSettings({ nodeId, mode, onSaved, onStateChange }: SettingsProps = {}) {
+function newDevice(parent_id: string | null): Device {
+  return {
+    id: 'node-' + crypto.randomUUID(), name: '', ip: '', kind: 'switch', parent_id, interface_map: {},
+    ports: 1, port: 161, community_env: 'SNMP_COMMUNITY',
+    auth_env: 'SNMP_V3_AUTH_KEY', privacy_env: 'SNMP_V3_PRIV_KEY',
+  };
+}
+
+export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange }: SettingsProps = {}) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selected, setSelected] = useState('');
   const [revision, setRevision] = useState('');
@@ -79,11 +89,21 @@ export function DeviceSettings({ nodeId, mode, onSaved, onStateChange }: Setting
   useEffect(() => {
     const controller = new AbortController();
     requestConfig({ signal: controller.signal }).then(config => {
+      if (mode === 'add') {
+        if (parentId && !config.devices.some(item => item.id === parentId)) {
+          throw new Error('Thiết bị cha không còn trong cấu hình.');
+        }
+        const draft = newDevice(parentId ?? null);
+        setDevices([...config.devices, draft]);
+        setSelected(draft.id);
+        setRevision(config.revision);
+        return;
+      }
       setDevices(config.devices);
       setSelected(nodeId ?? config.devices[0]?.id ?? '');
       setRevision(config.revision);
-    }).catch(() => {
-      if (!controller.signal.aborted) setError('Không tải được cấu hình thiết bị.');
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Không tải được cấu hình thiết bị.');
     });
     async function refreshPorts() {
       try {
@@ -101,7 +121,7 @@ export function DeviceSettings({ nodeId, mode, onSaved, onStateChange }: Setting
       controller.abort();
       clearInterval(timer);
     };
-  }, [nodeId]);
+  }, [nodeId, mode, parentId]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -136,13 +156,9 @@ export function DeviceSettings({ nodeId, mode, onSaved, onStateChange }: Setting
   }
 
   function addDevice() {
-    const id = 'node-' + crypto.randomUUID();
-    edit([...devices, {
-      id, name: '', ip: '', kind: 'switch', parent_id: null, interface_map: {},
-      ports: 1, port: 161, community_env: 'SNMP_COMMUNITY',
-      auth_env: 'SNMP_V3_AUTH_KEY', privacy_env: 'SNMP_V3_PRIV_KEY',
-    }]);
-    setSelected(id);
+    const draft = newDevice(null);
+    edit([...devices, draft]);
+    setSelected(draft.id);
   }
 
   function removeDevice() {
@@ -192,7 +208,7 @@ export function DeviceSettings({ nodeId, mode, onSaved, onStateChange }: Setting
       setRevision(saved.revision);
       setDirty(false);
       setMessage('Đã lưu và cập nhật sơ đồ mạng.');
-      onSaved?.();
+      onSaved?.(selected);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Không lưu được cấu hình.');
     } finally {
@@ -216,8 +232,8 @@ export function DeviceSettings({ nodeId, mode, onSaved, onStateChange }: Setting
   }
 
   return (
-    <div className={nodeId ? 'device-settings node-settings' : 'device-settings'}>
-      {!nodeId && <>
+    <div className={mode ? 'device-settings node-settings' : 'device-settings'}>
+      {!mode && <>
       <a className="config-back" href="/"><ArrowLeft size={17} /> Sơ đồ mạng</a>
       <header className="config-heading">
         <div><h1>Cấu hình thiết bị</h1><p>Chọn thiết bị cha và cổng nối để cập nhật sơ đồ mạng.</p></div>
@@ -225,7 +241,7 @@ export function DeviceSettings({ nodeId, mode, onSaved, onStateChange }: Setting
       </header>
       </>}
       <div className="config-layout">
-        {!nodeId && <aside className="config-list" aria-label="Thiết bị mạng">
+        {!mode && <aside className="config-list" aria-label="Thiết bị mạng">
           <h2>Thiết bị <span>{devices.length}</span></h2>
           {devices.map(item => (
             <button key={item.id} className="config-item" aria-current={item.id === selected}
@@ -285,10 +301,14 @@ export function DeviceSettings({ nodeId, mode, onSaved, onStateChange }: Setting
                 {device.snmp === 'v3' && <>
                   <label>Tên người dùng<input required value={device.username ?? ''} onChange={event => patch({ username: event.target.value })} /></label>
                   <label>Thuật toán xác thực<select value={device.auth_protocol ?? 'sha256'}
-                    onChange={event => patch({ auth_protocol: event.target.value as 'sha' | 'sha256' })}>
-                    <option value="sha256">SHA-256</option><option value="sha">SHA-1</option>
+                    onChange={event => patch({ auth_protocol: event.target.value as 'sha' | 'sha256' | 'sha512' })}>
+                    <option value="sha256">SHA-256</option><option value="sha512">SHA-512</option><option value="sha">SHA-1</option>
                   </select></label>
                   <label>Tên biến khóa xác thực<input required value={device.auth_env} onChange={event => patch({ auth_env: event.target.value })} /></label>
+                  <label>Thuật toán mã hóa<select value={device.privacy_protocol ?? 'aes'}
+                    onChange={event => patch({ privacy_protocol: event.target.value as Device['privacy_protocol'] })}>
+                    <option value="aes">AES-128</option><option value="aes256b">AES-256 Blumenthal</option><option value="aes256r">AES-256 Reeder</option>
+                  </select></label>
                   <label>Tên biến khóa mã hóa<input required value={device.privacy_env} onChange={event => patch({ privacy_env: event.target.value })} /></label>
                 </>}
               </div>
@@ -299,7 +319,7 @@ export function DeviceSettings({ nodeId, mode, onSaved, onStateChange }: Setting
           {error && <p className="config-error" role="alert">{error}</p>}
           {message && <p className="config-success" role="status">{message}</p>}
           <footer className="config-actions">
-            {!nodeId && <button className="config-button config-delete" type="button" disabled={busy || !device || devices.length <= 1}
+            {!mode && <button className="config-button config-delete" type="button" disabled={busy || !device || devices.length <= 1}
               onClick={removeDevice}><Trash2 size={16} /> Xóa thiết bị</button>}
             <button className="config-button config-save" type="submit" disabled={busy || !dirty}><Save size={16} />
               {busy ? 'Đang lưu…' : 'Lưu cấu hình'}</button>

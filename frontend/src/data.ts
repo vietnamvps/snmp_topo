@@ -10,7 +10,9 @@ export type Device = {
   status: 'online' | 'warning' | 'offline' | 'unknown';
   down_bps: number | null;
   up_bps: number | null;
-  host: { cpu_percent: number | null; ram_percent: number | null } | null;
+  traffic_history?: (number | null)[];
+  uplink?: { index: number; name: string | null; capacity_bps?: number | null } | null;
+  host: { uptime_seconds?: number | null; cpu_percent: number | null; ram_percent: number | null } | null;
 };
 
 export type Snapshot = {

@@ -51,8 +51,10 @@ function liveRates(device: Device, parent: Device | undefined,
   return { down_bps: null, up_bps: null, status: sampled ? 'online' : device.snmp ? 'offline' : 'unknown' };
 }
 
+export type TrafficHistory = Map<string, (number | null)[]>;
+
 export function buildTopology(devices: Device[], samples: Map<string, Sample>,
-  previous: Map<string, Sample>, mock: boolean, speedtest: Speedtest | null) {
+  previous: Map<string, Sample>, mock: boolean, speedtest: Speedtest | null, history: TrafficHistory = new Map(), record = false) {
   const byId = new Map(devices.map(device => [device.id, device]));
   const ports = new Map(devices.map(({ id }) => [id, interfaceData(samples.get(id), previous.get(id))]));
   const now = performance.now() / 1000;
@@ -61,10 +63,18 @@ export function buildTopology(devices: Device[], samples: Map<string, Sample>,
     const parent = parent_id === null ? undefined : byId.get(parent_id);
     const sample = samples.get(id);
     const rates = mock ? mockRates(device, now) : liveRates(device, parent, ports, Boolean(sample));
-    const host = mock ? { cpu_percent: Math.round(220 + 80 * Math.sin(now / 9)) / 10, ram_percent: 48.2 }
-      : sample ? hostMetrics(sample) : null;
+    const host = mock ? { cpu_percent: Math.round(220 + 80 * Math.sin(now / 9)) / 10, ram_percent: 48.2, uptime_seconds: 2_073_600 + Math.floor(now) }
+      : sample ? { ...hostMetrics(sample), uptime_seconds: sample.uptime == null ? null : Math.floor(sample.uptime / 100) } : null;
+    const index = kind === 'firewall' ? device.wan_interface : parent?.interface_map[id];
+    const portSample = kind === 'firewall' ? sample : parent ? samples.get(parent.id) : undefined;
+    const speed = index == null ? undefined : portSample?.tables.speed?.get(String(index));
+    const capacity = typeof speed === 'number' && speed > 0 ? speed * 1e6 : null;
+    const status = capacity && rates.status === 'online' &&
+      Math.max(rates.down_bps ?? 0, rates.up_bps ?? 0) > capacity * 0.75 ? 'warning' : rates.status;
+    const port = index == null ? undefined : ports.get(kind === 'firewall' ? id : parent?.id ?? '')?.get(index);
     return {
-      id, name, ip, kind, parent_id, ...rates,
+      id, name, ip, kind, parent_id, ...rates, status,
+      uplink: index == null ? null : { index, name: port?.name ?? null, capacity_bps: capacity },
       interfaces: [...(ports.get(id)?.values() ?? [])],
       neighbors: [...(sample?.tables.lldp?.values() ?? [])].filter(value => typeof value === 'string'),
       host: kind === 'firewall' ? host : null,
@@ -77,11 +87,21 @@ export function buildTopology(devices: Device[], samples: Map<string, Sample>,
     wan.up_bps = firewall.up_bps;
     wan.status = firewall.status;
   }
+  const withHistory = nodes.map(node => {
+    let points = history.get(node.id) ?? [];
+    if (record) {
+      const traffic = node.down_bps == null && node.up_bps == null ? null
+        : (node.down_bps ?? 0) + (node.up_bps ?? 0);
+      points = [...points.slice(-14), traffic];
+      history.set(node.id, points);
+    }
+    return { ...node, traffic_history: points };
+  });
   const interfaces = nodes.flatMap(node => node.interfaces);
   return {
     updated_at: new Date().toISOString(),
     mock,
-    devices: nodes,
+    devices: withHistory,
     summary: {
       ports_up: mock ? devices.reduce((sum, device) => sum + (MOCK_PORTS_UP.get(device.id) ?? 0), 0)
         : interfaces.filter(port => port.up).length,

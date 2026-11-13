@@ -6,6 +6,7 @@ const OIDS = {
   status: '1.3.6.1.2.1.2.2.1.8',
   rx: '1.3.6.1.2.1.31.1.1.1.6',
   tx: '1.3.6.1.2.1.31.1.1.1.10',
+  speed: '1.3.6.1.2.1.31.1.1.1.15',
   discontinuity: '1.3.6.1.2.1.31.1.1.1.19',
   cpu: '1.3.6.1.2.1.25.3.3.1.2',
   storageType: '1.3.6.1.2.1.25.2.3.1.2',
@@ -41,7 +42,7 @@ function createSession(device: Device) {
     name: device.username,
     level: snmp.SecurityLevel.authPriv,
     authProtocol: snmp.AuthProtocols[device.auth_protocol],
-    privProtocol: snmp.PrivProtocols.aes,
+    privProtocol: snmp.PrivProtocols[device.privacy_protocol],
     authKey,
     privKey,
   }, options);
@@ -56,6 +57,16 @@ function getUptime(session: snmp.Session): Promise<number | undefined> {
         ? binding.value : undefined);
     });
   });
+}
+
+export async function probeSnmp(device: Device) {
+  const session = createSession(device);
+  session.on('error', () => {});
+  try {
+    return (await getUptime(session)) !== undefined;
+  } finally {
+    session.close();
+  }
 }
 
 function walk(session: snmp.Session, oid: string): Promise<Table> {
@@ -88,7 +99,7 @@ export async function pollSnmp(device: Device, metadata: boolean): Promise<Sampl
   session.on('error', () => {});
   try {
     const uptime = await getUptime(session);
-    const names: TableName[] = ['status', 'rx', 'tx', 'discontinuity'];
+    const names: TableName[] = ['status', 'rx', 'tx', 'discontinuity', 'speed'];
     if (metadata) names.push('name', 'lldp');
     if (device.kind === 'firewall') names.push('cpu', 'storageType', 'storageSize', 'storageUsed');
     const results = await Promise.allSettled(names.map(name => walk(session, OIDS[name])));
