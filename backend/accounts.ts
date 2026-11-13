@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { migrateSecrets } from './secrets.js';
 import { migrateDevices, openDevices } from './devices.js';
 import { projectRoot } from './configuration.js';
 
@@ -37,7 +38,7 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
   db.exec('BEGIN IMMEDIATE');
   try {
     const version = Number(db.pragma('user_version', { simple: true }));
-    if (version > 2) throw new Error('Account database schema is newer than this application');
+    if (version > 3) throw new Error('Account database schema is newer than this application');
     if (version === 0) db.exec(`
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -57,6 +58,7 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
       PRAGMA user_version=1;
     `);
     if (version < 2) migrateDevices(db);
+    if (version < 3) migrateSecrets(db);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');

@@ -133,7 +133,7 @@ export function openDevices(db: Database.Database) {
     commit(() => devices, null);
     console.log(`Imported ${devices.length} devices into SQLite`);
   });
-  return { read, seed: () => seed.immediate(), commit: (update: (before: DeviceRow[]) => DeviceRow[],
+  return { read, atomic: <T>(operation: () => T) => db.transaction(operation).immediate(), seed: () => seed.immediate(), commit: (update: (before: DeviceRow[]) => DeviceRow[],
     actor: number | null, dryRun = false) => commit.immediate(update, actor, dryRun),
     exportYaml: () => stringify({ devices: list() }) };
 }

@@ -23,17 +23,19 @@ export type Sample = {
   uptime?: number;
 };
 
-function createSession(device: Device) {
+type Credentials = { community?: string; auth_key?: string; priv_key?: string };
+
+function createSession(device: Device, credentials: Credentials) {
   const options = { port: device.port, timeout: 800, retries: 0,
     transport: device.ip.includes(':') ? 'udp6' as const : 'udp4' as const };
   if (device.snmp === 'v2c') {
-    const community = process.env[device.community_env];
+    const community = credentials.community;
     if (!community) throw new Error('Missing SNMPv2c community');
     return snmp.createSession(device.ip, community, { ...options, version: snmp.Version2c });
   }
 
-  const authKey = process.env[device.auth_env];
-  const privKey = process.env[device.privacy_env];
+  const authKey = credentials.auth_key;
+  const privKey = credentials.priv_key;
   if (!device.username || !authKey || !privKey || authKey.length < 8 || privKey.length < 8) {
     throw new Error('SNMPv3 authPriv requires username and both passphrases');
   }
@@ -59,8 +61,8 @@ function getUptime(session: snmp.Session): Promise<number | undefined> {
   });
 }
 
-export async function probeSnmp(device: Device) {
-  const session = createSession(device);
+export async function probeSnmp(device: Device, credentials: Credentials) {
+  const session = createSession(device, credentials);
   session.on('error', () => {});
   try {
     return (await getUptime(session)) !== undefined;
@@ -93,8 +95,8 @@ function walk(session: snmp.Session, oid: string): Promise<Table> {
   });
 }
 
-export async function pollSnmp(device: Device, metadata: boolean): Promise<Sample> {
-  const session = createSession(device);
+export async function pollSnmp(device: Device, metadata: boolean, credentials: Credentials): Promise<Sample> {
+  const session = createSession(device, credentials);
   // Socket failures also surface through request callbacks or their timeout.
   session.on('error', () => {});
   try {

@@ -5,6 +5,7 @@ import express from 'express';
 import { WebSocket, WebSocketServer } from 'ws';
 import { projectRoot, type Device } from './configuration.js';
 import { deviceRoutes } from './device-routes.js';
+import { openSecrets } from './secrets.js';
 import { probeIcmp } from './icmp.js';
 import { openAccounts } from './accounts.js';
 import { configureSecurity } from './security.js';
@@ -18,6 +19,8 @@ function envNumber(name: string, fallback: number, minimum: number) {
 }
 
 const accounts = openAccounts();
+const secrets = openSecrets(accounts.db);
+if (secrets.error) console.error(secrets.error);
 accounts.devices.seed();
 let devices = accounts.devices.read();
 let revision = randomUUID();
@@ -90,16 +93,21 @@ app.post('/api/devices/:id/probe', async (request, response) => {
     response.status(429).json({ error: 'Đang kiểm tra thiết bị. Hãy thử lại sau.' });
     return;
   }
+  const credentials = device.monitor_mode === 'snmp' ? secrets.resolveCredentials(device) : undefined;
+  if (device.monitor_mode === 'snmp' && !credentials) {
+    response.json({ mock: false, status: 'unconfigured' });
+    return;
+  }
   activeProbes.add(device.id);
   try {
-    const online = await (device.monitor_mode === 'icmp' ? probeIcmp(device) : probeSnmp(device)).catch(() => false);
+    const online = await (device.monitor_mode === 'icmp' ? probeIcmp(device) : probeSnmp(device, credentials!)).catch(() => false);
     response.json({ mock: false, status: online ? 'online' : 'offline' });
   } finally {
     activeProbes.delete(device.id);
   }
 });
 
-app.use('/api/devices', deviceRoutes(accounts.devices, security, reloadDevices));
+app.use('/api/devices', deviceRoutes(accounts.devices, security, reloadDevices, secrets));
 
 app.use(express.static(resolve(projectRoot, 'frontend/dist')));
 app.get(['/devices', '/users'], (_request, response) => response.sendFile(resolve(projectRoot, 'frontend/dist/index.html')));
@@ -157,14 +165,20 @@ async function pollIcmp(devices: Device[], reachable: Map<string, boolean>) {
 
 async function runPoller() {
   const pollRevision = revision;
-  const managed = devices.filter(device => device.enabled && device.monitor_mode === 'snmp');
+  const unconfigured = new Set<string>();
+  const managed = mock ? [] : devices.flatMap(device => {
+    if (!device.enabled || device.monitor_mode !== 'snmp') return [];
+    const credentials = secrets.resolveCredentials(device);
+    if (!credentials) unconfigured.add(device.id);
+    return credentials ? [{ device, credentials }] : [];
+  });
   const start = performance.now();
   const samples = new Map<string, Sample>();
   const reachable = new Map<string, boolean>();
   if (!mock) {
     const pings = pollIcmp(devices, reachable);
-    const results = await Promise.allSettled(managed.map(device =>
-      pollSnmp(device, cycle % 20 === 0 || !metadataCache.has(device.id))));
+    const results = await Promise.allSettled(managed.map(({ device, credentials }) =>
+      pollSnmp(device, cycle % 20 === 0 || !metadataCache.has(device.id), credentials)));
     await pings;
     if (stopped) return;
     if (pollRevision !== revision) {
@@ -172,7 +186,7 @@ async function runPoller() {
       return;
     }
     results.forEach((result, index) => {
-      const { id } = managed[index];
+      const { id } = managed[index].device;
       if (result.status === 'rejected') {
         console.warn(`SNMP poll failed for ${id}`);
         return;
@@ -188,13 +202,13 @@ async function runPoller() {
     });
   }
   if (stopped) return;
-  publish(samples, true, reachable);
+  publish(samples, true, reachable, unconfigured);
   cycle += 1;
   pollTimer = setTimeout(requestPoll, Math.max(0, interval - (performance.now() - start)));
 }
 
-function publish(samples: Map<string, Sample>, record = true, reachable = new Map<string, boolean>()) {
-  snapshot = buildTopology(devices, samples, previous, mock, speedtest, history, record, reachable);
+function publish(samples: Map<string, Sample>, record = true, reachable = new Map<string, boolean>(), unconfigured = new Set<string>()) {
+  snapshot = buildTopology(devices, samples, previous, mock, speedtest, history, record, reachable, unconfigured);
   previous = samples;
   const payload = JSON.stringify(snapshot);
   for (const client of streams.clients) {

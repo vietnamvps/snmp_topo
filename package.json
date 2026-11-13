@@ -16,6 +16,8 @@
     "user:create": "node --env-file-if-exists=.env backend/dist/user-cli.js create",
     "user:passwd": "node --env-file-if-exists=.env backend/dist/user-cli.js passwd",
     "user:disable": "node --env-file-if-exists=.env backend/dist/user-cli.js disable",
+    "secrets:rotate": "node --env-file-if-exists=.env backend/dist/secrets-cli.js rotate",
+    "secrets:check": "node --env-file-if-exists=.env backend/dist/secrets-cli.js check",
     "prestart": "npm run build",
     "start": "node --env-file-if-exists=.env backend/dist/main.js"
   },

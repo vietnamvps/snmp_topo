@@ -2,7 +2,7 @@ import type { Device } from './configuration.js';
 import { counterRate, hostMetrics, type Sample } from './snmp.js';
 
 export type Speedtest = { ping_ms: number; down_bps: number; up_bps: number };
-type Status = 'online' | 'offline' | 'warning' | 'unknown';
+type Status = 'online' | 'offline' | 'warning' | 'unknown' | 'unconfigured';
 type Rates = { down_bps: number | null; up_bps: number | null; status: Status };
 
 const MOCK_PORTS_UP = new Map([['firewall', 4], ['core', 11], ['cisco', 8], ['sw1', 6], ['sw2', 4]]);
@@ -54,7 +54,7 @@ function liveRates(device: Device, parent: Device | undefined,
 export type TrafficHistory = Map<string, (number | null)[]>;
 
 export function buildTopology(devices: Device[], samples: Map<string, Sample>,
-  previous: Map<string, Sample>, mock: boolean, speedtest: Speedtest | null, history: TrafficHistory = new Map(), record = false, reachable = new Map<string, boolean>()) {
+  previous: Map<string, Sample>, mock: boolean, speedtest: Speedtest | null, history: TrafficHistory = new Map(), record = false, reachable = new Map<string, boolean>(), unconfigured = new Set<string>()) {
   const byId = new Map(devices.map(device => [device.id, device]));
   const ports = new Map(devices.map(({ id }) => [id, interfaceData(samples.get(id), previous.get(id))]));
   const now = performance.now() / 1000;
@@ -69,7 +69,7 @@ export function buildTopology(devices: Device[], samples: Map<string, Sample>,
     const portSample = kind === 'firewall' ? sample : parent ? samples.get(parent.id) : undefined;
     const speed = index == null ? undefined : portSample?.tables.speed?.get(String(index));
     const capacity = typeof speed === 'number' && speed > 0 ? speed * 1e6 : null;
-    const monitoredStatus = !mock && device.enabled && device.monitor_mode === 'icmp'
+    const monitoredStatus = unconfigured.has(id) ? 'unconfigured' : !mock && device.enabled && device.monitor_mode === 'icmp'
       ? reachable.has(id) ? reachable.get(id) ? 'online' : 'offline' : 'unknown'
       : !device.enabled ? 'unknown' : rates.status;
     const status = device.monitor_mode !== 'icmp' && capacity && monitoredStatus === 'online' &&

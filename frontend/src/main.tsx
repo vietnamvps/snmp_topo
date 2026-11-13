@@ -327,7 +327,7 @@ function Dashboard() {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(t(apiErrorKey(response.status, 'probeError')) + ' (' + response.status + ')');
       if (device) {
-        const status = { online: t('responding'), warning: t('warning'), offline: t('noResponse'), unknown: t('unknown') };
+        const status = { online: t('responding'), warning: t('warning'), offline: t('noResponse'), unknown: t('unknown'), unconfigured: t('unconfigured') };
         notify(deviceName(device, result.mock) + ': ' + (status[result.status as keyof typeof status] ?? t('unknown')) + (result.mock ? ' (' + t('mock') + ')' : ''));
       } else {
         await refresh();

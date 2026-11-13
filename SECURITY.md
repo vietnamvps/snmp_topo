@@ -31,3 +31,7 @@ Giữ thư mục SQLite và bản sao lưu ngoài Git. Tài khoản dịch vụ 
 
 - Device inventory lives in SQLite. Admin device changes record before/after values in the audit log. YAML exports and audit records include SNMP environment-variable names only. Keep exported topology files private because they contain management addresses.
 - Compose mounts the configuration directory read-only for one-time seeding. Preserve the existing SQLite data directory when upgrading. `DEVICES_READ_ONLY=true` blocks device mutations through the API.
+
+- Khóa SNMP lưu bằng AES-256-GCM. API chỉ trả cờ đã đặt. Audit ghi tên trường thay đổi và YAML export chỉ chứa tên biến dự phòng.
+- Sao lưu SQLite và master key ở hai nơi riêng. Trên Unix, giữ file master key ở quyền 0600. Khi thiếu hoặc sai key, dịch vụ vẫn chạy và báo lỗi rõ ràng. Các khóa đã mã hóa sẽ không đọc được cho đến khi khôi phục đúng key.
+- Dừng dịch vụ trước khi xoay khóa. Rotation dùng SQLite transaction và file tạm .master.key.next để phục hồi sau gián đoạn. Xem hướng dẫn trong README.

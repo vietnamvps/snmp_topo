@@ -65,7 +65,7 @@ On the first start with an empty device database, the dashboard imports `DEVICES
 
 1. Install `os-net-snmp` under **System → Firmware → Plugins**. Enable **Services → NET-SNMP** on the management address and configure a read-only SNMP user. Prefer SNMPv3 `authPriv` with compatible authentication and encryption settings.
 2. On the firewall interface receiving poller traffic, allow UDP port 161 from the poller's exact IP to the OPNsense management address. Place a block for all other sources to that destination and port above broad allow rules. Keep SNMP off the WAN.
-3. Set the firewall's management IP and WAN `ifIndex` in the device configuration. Store the SNMP community or SNMPv3 keys in environment variables. Set `MOCK_MODE=false`, bootstrap an administrator, and restart. Set `DASHBOARD_TOKEN` only if you use Bearer automation. Set `DASHBOARD_ORIGIN` to the exact browser origin. The default for Docker live mode is HTTPS through a reverse proxy with WebSocket upgrades. For trusted LAN HTTP, use the explicit opt-in below.
+3. Set the firewall's management IP and WAN `ifIndex` in the device configuration. Enter SNMP credentials in Edit device. Environment variable names remain available as optional fallbacks. Set `MOCK_MODE=false`, bootstrap an administrator, and restart. Set `DASHBOARD_TOKEN` only if you use Bearer automation. Set `DASHBOARD_ORIGIN` to the exact browser origin. The default for Docker live mode is HTTPS through a reverse proxy with WebSocket upgrades. For trusted LAN HTTP, use the explicit opt-in below.
 
 ## Security
 
@@ -116,3 +116,11 @@ npm run user:disable -- operator
 Use `npm run user:passwd -- operator` with the same password input procedure to reset a password. For an image-only deployment, execute `node backend/dist/user-cli.js` in the running container with the corresponding command and username, using Docker exec environment injection for `USER_PASSWORD`.
 
 The account store uses better-sqlite3 because Node 26 still labels its built-in SQLite API a release candidate. Password derivation uses Node's asynchronous Argon2id.
+
+## SNMP credential storage and rotation
+
+Enter credentials in **Edit device**. Leave a password field blank to keep its current value, or select **Delete** and save to remove it. A configured fallback environment variable can still supply a credential after deletion. Credentials travel in plaintext over LAN HTTP.
+
+Back up the SQLite database at `DATABASE_FILE` (default `data/app.db`) with the app stopped or via a SQLite-aware backup. Back up `data/.master.key` separately in a restricted location. If using `SECRETS_MASTER_KEY`, back up that exact 32-byte base64 key separately instead. Restore the matching database and key together.
+
+Run `npm run secrets:check` to list devices with missing or unreadable SNMP credentials. To rotate, stop the app, back up the database and key, and run `npm run secrets:rotate` with the existing key available. Rotation switches to the new `data/.master.key`. Remove `SECRETS_MASTER_KEY` from the runtime environment and .env before restarting. For Compose, stop the service, then run `docker compose run --rm --no-deps opnsense-monitor npm run secrets:rotate`. Keep the data mount writable. Preserve any .master.key.next file after an interrupted rotation until startup has reconciled it with the database fingerprint.

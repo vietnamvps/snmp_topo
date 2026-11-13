@@ -81,7 +81,7 @@ export const DeviceCard = memo(function DeviceCard({ id, data }: NodeProps<Topol
           <strong title={name}>{name}</strong>
         </div>
         <span className="blade-state" title={t(device.status)}>
-          {{ online: t('up'), offline: t('down'), warning: t('load'), unknown: '—' }[device.status]}
+          {{ online: t('up'), offline: t('down'), warning: t('load'), unknown: '—', unconfigured: t('unconfigured') }[device.status]}
         </span>
       </div>
       <div className="device-meta">

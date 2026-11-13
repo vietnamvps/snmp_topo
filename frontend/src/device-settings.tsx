@@ -5,7 +5,13 @@ import { ArrowLeft, Cable, Plus, Save, Trash2 } from 'lucide-react';
 import type { Kind } from './data';
 import './device-settings.css';
 
+type SecretField = 'community' | 'auth_key' | 'priv_key';
+type SecretDraft = Partial<Record<SecretField, string | null>>;
+
 type Device = {
+  has_community?: boolean;
+  has_auth_key?: boolean;
+  has_priv_key?: boolean;
   id: string;
   name: string;
   ip: string;
@@ -78,8 +84,33 @@ function newDevice(parent_id: string | null): Device {
   };
 }
 
+function SecretInput({ field, configured, value, onChange }: {
+  field: SecretField; configured?: boolean; value?: string | null; onChange: (value: string | null | undefined) => void;
+}) {
+  const { t } = useLanguage();
+  const [editing, setEditing] = useState(false);
+  const minLength = field === 'community' ? 1 : 8;
+  return <div>
+    <label>{t(field === 'community' ? 'communitySecret' : field === 'auth_key' ? 'authSecret' : 'privSecret')}
+      <input type="password" autoComplete="new-password" minLength={minLength} maxLength={256}
+        value={value ?? ''} disabled={configured && !editing && value !== null}
+        onChange={event => onChange(event.target.value || undefined)} />
+    </label>
+    {configured && <small>{t(value === null ? 'secretRemovePending' : 'secretConfigured')}</small>}
+    {configured && value !== null && <div className="config-actions">
+      <button type="button" className="config-button" onClick={() => setEditing(true)}>{t('secretReplace')}</button>
+      <button type="button" className="config-button" onClick={() => onChange(null)}>{t('delete')}</button>
+    </div>}
+    {value === null && <button type="button" className="config-button" onClick={() => {
+      onChange(undefined);
+      setEditing(false);
+    }}>{t('secretUndo')}</button>}
+  </div>;
+}
+
 export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange }: SettingsProps = {}) {
   const { t, deviceName } = useLanguage();
+  const [secretDraft, setSecretDraft] = useState<SecretDraft>({});
   const [mock, setMock] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [selected, setSelected] = useState('');
@@ -93,8 +124,18 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
   const device = devices.find(item => item.id === selected);
   const parent = devices.find(item => item.id === device?.parent_id);
   const blocked = descendants(devices, selected);
+  const insecurePage = location.protocol === 'http:' &&
+    !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  function secretInput(field: SecretField) {
+    return <SecretInput key={selected + ':' + field} field={field} configured={device?.[`has_${field}`]}
+      value={secretDraft[field]} onChange={value => {
+        setSecretDraft(previous => ({ ...previous, [field]: value }));
+        setDirty(true);
+      }} />;
+  }
 
   useEffect(() => {
+    setSecretDraft({});
     const controller = new AbortController();
     requestConfig({ signal: controller.signal }).then(config => {
       setSavedIds(config.devices.map(item => item.id));
@@ -175,6 +216,7 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
       const next = devices.filter(item => item.id !== device.id);
       setDevices(next);
       setSelected(next[0]?.id ?? '');
+      setSecretDraft({});
       setDirty(false);
       return;
     }
@@ -184,10 +226,10 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
   async function save(event: FormEvent) {
     event.preventDefault();
     if (busy || !dirty || !device) return;
-    const { id, interface_map: _map, ...fields } = device;
+    const { id, interface_map: _map, has_community, has_auth_key, has_priv_key, ...fields } = device;
     const exists = savedIds.includes(id);
     await persist(() => requestConfig({
-      method: exists ? 'PATCH' : 'POST', headers, body: JSON.stringify(exists ? fields : { id, ...fields }),
+      method: exists ? 'PATCH' : 'POST', headers, body: JSON.stringify({ ...(exists ? fields : { id, ...fields }), ...secretDraft }),
     }, exists ? '/' + id : ''));
   }
 
@@ -213,6 +255,7 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
       setDevices(saved.devices);
       setSavedIds(saved.devices.map(item => item.id));
       if (resetSelection) setSelected(saved.devices[0]?.id ?? '');
+      setSecretDraft({});
       setDirty(false);
       setMessage('saved');
       onSaved?.(selected);
@@ -318,22 +361,26 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
                 </select></label>}
                 {device.monitor_mode === 'snmp' && device.snmp && <label>{t('udpPort')}<input type="number" min="1" max="65535" required value={device.port || ''}
                   onChange={event => patch({ port: Number(event.target.value) })} /></label>}
-                {device.monitor_mode === 'snmp' && device.snmp === 'v2c' && <label>{t('communityVar')}<input required value={device.community_env}
+                {device.monitor_mode === 'snmp' && device.snmp === 'v2c' && secretInput('community')}
+                {device.monitor_mode === 'snmp' && device.snmp === 'v2c' && <label>{t('communityVar')}<input value={device.community_env}
                   onChange={event => patch({ community_env: event.target.value })} /></label>}
                 {device.monitor_mode === 'snmp' && device.snmp === 'v3' && <>
+                  {secretInput('auth_key')}
+                  {secretInput('priv_key')}
                   <label>{t('username')}<input required value={device.username ?? ''} onChange={event => patch({ username: event.target.value })} /></label>
                   <label>{t('authAlgorithm')}<select value={device.auth_protocol ?? 'sha256'}
                     onChange={event => patch({ auth_protocol: event.target.value as 'sha' | 'sha256' | 'sha512' })}>
                     <option value="sha256">SHA-256</option><option value="sha512">SHA-512</option><option value="sha">SHA-1</option>
                   </select></label>
-                  <label>{t('authVar')}<input required value={device.auth_env} onChange={event => patch({ auth_env: event.target.value })} /></label>
+                  <label>{t('authVar')}<input value={device.auth_env} onChange={event => patch({ auth_env: event.target.value })} /></label>
                   <label>{t('privacyAlgorithm')}<select value={device.privacy_protocol ?? 'aes'}
                     onChange={event => patch({ privacy_protocol: event.target.value as Device['privacy_protocol'] })}>
                     <option value="aes">AES-128</option><option value="aes256b">AES-256 Blumenthal</option><option value="aes256r">AES-256 Reeder</option>
                   </select></label>
-                  <label>{t('privacyVar')}<input required value={device.privacy_env} onChange={event => patch({ privacy_env: event.target.value })} /></label>
+                  <label>{t('privacyVar')}<input value={device.privacy_env} onChange={event => patch({ privacy_env: event.target.value })} /></label>
                 </>}
               </div>
+              {device.monitor_mode === 'snmp' && insecurePage && <p className="config-error" role="alert">{t('secretHttpWarning')}</p>}
               {device.snmp && <p className="config-hint">{t('secretHint')}</p>}
             </>}
           </fieldset>

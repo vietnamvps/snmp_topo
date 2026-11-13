@@ -16,3 +16,6 @@ logs/
 /data/
 *.db*
 *.sqlite*
+
+.master.key
+.master.key.next

@@ -6,7 +6,7 @@ export const projectRoot = fileURLToPath(new URL('../../', import.meta.url));
 const ifIndex = z.coerce.number<string | number>().int().min(1).max(2147483647);
 export const idSchema = z.string().regex(/^[a-z0-9_-]{1,32}$/)
   .refine(value => !Object.hasOwn(Object.prototype, value) && value !== 'prototype', 'ID dành riêng.');
-const snmpEnv = z.string().regex(/^SNMP_[A-Z0-9_]+$/).max(64);
+const snmpEnv = z.union([z.literal(''), z.string().regex(/^SNMP_[A-Z0-9_]+$/).max(64)]);
 const managementAddress = z.string().trim().max(253).refine(value =>
   (isIP(value) !== 0 && !value.includes('%')) || (
     !/^[\d.]+$/.test(value) && value.split('.').every(label =>

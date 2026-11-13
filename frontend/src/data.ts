@@ -7,7 +7,7 @@ export type Device = {
   ip: string;
   kind: Kind;
   parent_id: string | null;
-  status: 'online' | 'warning' | 'offline' | 'unknown';
+  status: 'online' | 'warning' | 'offline' | 'unknown' | 'unconfigured';
   down_bps: number | null;
   up_bps: number | null;
   traffic_history?: (number | null)[];
