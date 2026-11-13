@@ -1,3 +1,4 @@
+import { useLanguage } from './language';
 import { createContext, memo, useContext } from 'react';
 import dagre from '@dagrejs/dagre';
 import { BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, getBezierPath, useInternalNode } from '@xyflow/react';
@@ -7,18 +8,17 @@ import type { Device, Kind } from './data';
 import { rate } from './data';
 
 const kinds = {
-  wan: ['WAN / ISP', Globe2],
-  firewall: ['FIREWALL', Shield],
-  core: ['CORE SWITCH', Network],
-  switch: ['SWITCH', Router],
-  ap: ['ACCESS POINT', Wifi],
-  camera: ['IP CAMERA', Camera],
-  nas: ['LƯU TRỮ', Database],
-  home: ['NHÀ THÔNG MINH', House],
-  server: ['MÁY CHỦ', Server],
-} as const satisfies Record<Kind, readonly [string, typeof Wifi]>;
+  wan: Globe2,
+  firewall: Shield,
+  core: Network,
+  switch: Router,
+  ap: Wifi,
+  camera: Camera,
+  nas: Database,
+  home: House,
+  server: Server,
+} as const satisfies Record<Kind, typeof Wifi>;
 
-const statusNames = { online: 'Online', offline: 'Offline', warning: 'Tải cao', unknown: 'Chưa rõ' };
 
 export type TopologyNode = Node<{
   device: Device;
@@ -34,6 +34,7 @@ export const bladeWidth = 228;
 export const bladeHeight = 118;
 
 function Sparkline({ history }: { history: (number | null)[] }) {
+  const { t } = useLanguage();
   const scale = Math.max(1, ...history.map(value => value ?? 0));
   let penDown = false;
   const path = history.map((value, i) => {
@@ -45,7 +46,7 @@ function Sparkline({ history }: { history: (number | null)[] }) {
     penDown = true;
     return command + ((15 - history.length + i) * 5 + 2) + ' ' + (23 - 20 * value / scale);
   }).join(' ');
-  return <svg className="blade-spark" viewBox="0 0 74 26" role="img" aria-label="Lưu lượng 15 nhịp gần nhất">
+  return <svg className="blade-spark" viewBox="0 0 74 26" role="img" aria-label={t('sparkline')}>
     <path d="M2 23H72 M2 13H72 M2 3H72" className="spark-grid" />
     <path d={path} className="spark-line" />
   </svg>;
@@ -54,14 +55,16 @@ function Sparkline({ history }: { history: (number | null)[] }) {
 const anchorSides = [Position.Top, Position.Bottom, Position.Left, Position.Right];
 
 export const TopologyHoverContext = createContext<{
-  focused?: string; related: ReadonlySet<string | undefined>; dragged?: string;
+  focused?: string; related: ReadonlySet<string | undefined>; dragged?: string; mock?: boolean;
 }>({ related: new Set() });
 
 export const DeviceCard = memo(function DeviceCard({ id, data }: NodeProps<TopologyNode>) {
-  const { focused, related } = useContext(TopologyHoverContext);
+  const { focused, related, mock } = useContext(TopologyHoverContext);
   const muted = focused && !related.has(id) ? ' topology-muted' : '';
   const { device, children, collapsed, toggle, matched } = data;
-  const [kind, Icon] = kinds[device.kind];
+  const { t, deviceName } = useLanguage();
+  const name = deviceName(device, mock);
+  const Icon = kinds[device.kind];
   const color = device.status === 'online' && ['firewall', 'core'].includes(device.kind) ? 'core' : device.status;
   return (
     <article className={`device-card ${color} ${matched ? 'matched' : ''}${muted}`}>
@@ -74,11 +77,11 @@ export const DeviceCard = memo(function DeviceCard({ id, data }: NodeProps<Topol
       <div className="device-heading">
         <span className="device-icon"><Icon size={19} /></span>
         <div className="device-title">
-          <div className="device-kind">{kind}</div>
-          <strong title={device.name}>{device.name}</strong>
+          <div className="device-kind">{t(device.kind)}</div>
+          <strong title={name}>{name}</strong>
         </div>
-        <span className="blade-state" title={statusNames[device.status]}>
-          {{ online: 'UP', offline: 'DOWN', warning: 'LOAD', unknown: '—' }[device.status]}
+        <span className="blade-state" title={t(device.status)}>
+          {{ online: t('up'), offline: t('down'), warning: t('load'), unknown: '—' }[device.status]}
         </span>
       </div>
       <div className="device-meta">
@@ -93,7 +96,7 @@ export const DeviceCard = memo(function DeviceCard({ id, data }: NodeProps<Topol
         <Sparkline history={device.traffic_history ?? []} />
       </div>
       {children > 0 && <button className="branch nodrag nopan" type="button" onClick={event => { event.stopPropagation(); toggle(device.id); }}
-        aria-label={`${collapsed ? 'Mở' : 'Thu gọn'} nhánh ${device.name}`} aria-expanded={!collapsed}>
+        aria-label={t(collapsed ? 'expand' : 'collapse') + ' · ' + name} aria-expanded={!collapsed}>
         {collapsed ? <Plus size={12} /> : <Minus size={12} />}
       </button>}
     </article>

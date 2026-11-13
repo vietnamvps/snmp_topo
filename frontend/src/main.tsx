@@ -1,3 +1,4 @@
+import { LanguageProvider, LanguageSwitch, useLanguage, apiErrorKey } from './language';
 import { createRoot } from 'react-dom/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Background, BackgroundVariant, ReactFlow, ReactFlowProvider, ViewportPortal, useNodesInitialized, useReactFlow } from '@xyflow/react';
@@ -16,7 +17,6 @@ import './style.css';
 
 const nodeTypes = { device: DeviceCard };
 const edgeTypes = { traffic: TrafficEdge };
-const clockFormat = new Intl.DateTimeFormat('vi-VN', { timeStyle: 'medium', hour12: false });
 
 function uptime(seconds?: number | null) {
   if (seconds == null) return '—';
@@ -26,6 +26,8 @@ function uptime(seconds?: number | null) {
 }
 
 function SystemBar({ snapshot, connected }: { snapshot?: Snapshot; connected: boolean }) {
+
+  const { t, language, deviceName } = useLanguage();
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -37,25 +39,26 @@ function SystemBar({ snapshot, connected }: { snapshot?: Snapshot; connected: bo
   const summary = snapshot?.summary;
   const percent = (value?: number | null) => value == null ? '—' : value + '%';
   const telemetry = [
-    ['CPU', percent(host?.cpu_percent)], ['RAM', percent(host?.ram_percent)], ['UPTIME', uptime(host?.uptime_seconds)],
-    ['ACTIVE PORTS', summary ? summary.ports_up + ' / ' + summary.ports_total : '—'],
-    ['WAN RX', rate(summary?.down_bps)], ['WAN TX', rate(summary?.up_bps)],
-    ['LATENCY', summary?.speedtest ? summary.speedtest.ping_ms + ' ms' : '—'],
+    [t('cpu'), percent(host?.cpu_percent)], [t('ram'), percent(host?.ram_percent)], [t('uptime'), uptime(host?.uptime_seconds)],
+    [t('activePorts'), summary ? summary.ports_up + ' / ' + summary.ports_total : '—'],
+    [t('rx'), rate(summary?.down_bps)], [t('tx'), rate(summary?.up_bps)],
+    [t('latency'), summary?.speedtest ? summary.speedtest.ping_ms + ' ms' : '—'],
   ];
   return <header className="command-bar">
     <div className="command-brand"><Network size={20} /><h1>OPNsense NOC</h1>
-      <span className={connected ? 'stream-state streaming' : 'stream-state'}>{snapshot?.mock ? 'MOCK' : connected ? 'LIVE' : 'REST'}</span>
+      <span className={connected ? 'stream-state streaming' : 'stream-state'}>{snapshot?.mock ? t('mock') : connected ? t('live') : t('rest')}</span>
     </div>
     <dl className="telemetry-strip">{telemetry.map(([label, value]) =>
       <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-    <time>{clockFormat.format(now)}</time>
+    <time>{now.toLocaleTimeString(language, { hour12: false })}</time>
+    <LanguageSwitch />
     <button className="tool" type="button" aria-expanded={drawerOpen} aria-controls="noc-drawer"
-      aria-label="Cấu hình và cảnh báo" title="Cấu hình và cảnh báo" onClick={() => setDrawerOpen(!drawerOpen)}><Settings size={18} /></button>
-    {drawerOpen && <aside className="command-drawer" id="noc-drawer" aria-label="Cấu hình và cảnh báo">
-      <a className="config-button" href="/devices">Cấu hình thiết bị</a>
-      <h2>Cảnh báo</h2>
-      {alerts.length ? <ul>{alerts.map(device => <li key={device.id}>{device.name}
-        <span>{device.status === 'offline' ? 'Offline' : 'Tải cao'}</span></li>)}</ul> : <p>Không có cảnh báo.</p>}
+      aria-label={t('drawer')} title={t('drawer')} onClick={() => setDrawerOpen(!drawerOpen)}><Settings size={18} /></button>
+    {drawerOpen && <aside className="command-drawer" id="noc-drawer" aria-label={t('drawer')}>
+      <a className="config-button" href="/devices">{t('settings')}</a>
+      <h2>{t('alerts')}</h2>
+      {alerts.length ? <ul>{alerts.map(device => <li key={device.id}>{deviceName(device, snapshot?.mock)}
+        <span>{device.status === 'offline' ? t('offline') : t('warning')}</span></li>)}</ul> : <p>{t('noAlerts')}</p>}
     </aside>}
   </header>;
 }
@@ -70,17 +73,19 @@ type MenuAnchor = { x: number; y: number; device?: Device };
 function NodeActions({ action, onClose, onSaved }: {
   action: DialogAction; onClose: () => void; onSaved: (id: string) => void;
 }) {
+
+  const { t } = useLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const { mode, device } = action;
-  const title = mode === 'add' ? device ? 'Thêm thiết bị con · ' + device.name : 'Thêm thiết bị'
-    : (mode === 'edit' ? 'Sửa ' : 'Xóa ') + device?.name;
+  const title = mode === 'add' ? device ? t('child') + ' · ' + device.name : t('add')
+    : t(mode === 'edit' ? 'edit' : 'delete') + ' · ' + device?.name;
 
   useEffect(() => { dialog.current?.showModal(); }, []);
 
   function close() {
-    if (busy || (dirty && !window.confirm('Bỏ các thay đổi chưa lưu?'))) return;
+    if (busy || (dirty && !window.confirm(t('discard')))) return;
     dialog.current?.close();
   }
 
@@ -88,7 +93,7 @@ function NodeActions({ action, onClose, onSaved }: {
     onClose={onClose} onCancel={event => { event.preventDefault(); close(); }}>
     <header className="node-dialog-heading">
       <h2 id="node-dialog-title">{title}</h2>
-      <button className="tool" type="button" aria-label="Đóng" onClick={close} disabled={busy}><X size={19} /></button>
+      <button className="tool" type="button" aria-label={t('close')} onClick={close} disabled={busy}><X size={19} /></button>
     </header>
     <DeviceSettings nodeId={mode === 'add' ? undefined : device?.id} parentId={mode === 'add' ? device?.id : undefined}
       mode={mode} onSaved={id => { onSaved(id); dialog.current?.close(); }}
@@ -97,6 +102,8 @@ function NodeActions({ action, onClose, onSaved }: {
 }
 
 function Dashboard() {
+  const { t, deviceName } = useLanguage();
+
   const { snapshot, connected, error, refresh } = useTopology();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [positions, setPositions] = useState(loadLayout);
@@ -139,7 +146,7 @@ function Dashboard() {
   }); }
 
   const structure = JSON.stringify(snapshot?.devices.map(({ id, parent_id, name, ip, kind }) =>
-    ({ id, parent_id, name, ip, kind })) ?? []);
+    ({ id, parent_id, name: deviceName({ id, name }, snapshot?.mock), ip, kind })) ?? []);
   const graph = useMemo(() => makeGraph(JSON.parse(structure) as Parameters<typeof makeGraph>[0], collapsed, toggleBranch, labels, query),
     [structure, collapsed, labels, query]);
   const placedNodes = useMemo(() => graph.nodes.map(node => ({
@@ -161,8 +168,8 @@ function Dashboard() {
       if (edge.source === focused) related.add(edge.target);
       if (edge.target === focused) related.add(edge.source);
     }
-    return { focused, related, dragged };
-  }, [dragged, hoveredNodeId, selected, graph]);
+    return { focused, related, dragged, mock: snapshot?.mock };
+  }, [dragged, hoveredNodeId, selected, graph, snapshot?.mock]);
 
   function updateDrag() {
     const session = dragSession.current;
@@ -242,7 +249,7 @@ function Dashboard() {
       if (next.size) localStorage.setItem(layoutKey, JSON.stringify(Object.fromEntries(next)));
       else localStorage.removeItem(layoutKey);
     } catch {
-      setLayoutMessage('Trình duyệt không lưu được bố cục.');
+      setLayoutMessage(t('layoutSaveError'));
     }
   }
 
@@ -255,7 +262,7 @@ function Dashboard() {
       fitRequested.current = true;
       storeLayout(new Map([...next].filter(([id]) => ids.has(id))));
     } catch {
-      setLayoutMessage('Tệp bố cục JSON không hợp lệ.');
+      setLayoutMessage(t('invalidLayout'));
     }
   }
 
@@ -291,21 +298,21 @@ function Dashboard() {
   }
 
   async function runNetworkAction(device?: Device) {
-    notify(device ? 'Đang kiểm tra SNMP…' : 'Đang làm mới SNMP…');
+    notify(device ? t('probing') : t('polling'));
     try {
       const endpoint = device ? '/api/devices/' + encodeURIComponent(device.id) + '/probe' : '/api/poll';
       const response = await fetch(endpoint, { method: 'POST', headers: { 'X-Device-Config': '1' } });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error ?? 'Không thực hiện được yêu cầu (' + response.status + ').');
+      if (!response.ok) throw new Error(t(apiErrorKey(response.status, 'probeError')) + ' (' + response.status + ')');
       if (device) {
-        const status = { online: 'có phản hồi', warning: 'tải cao', offline: 'không phản hồi', unknown: 'chưa rõ' };
-        notify(device.name + ': ' + (status[result.status as keyof typeof status] ?? 'chưa rõ') + (result.mock ? ' (mock)' : ''));
+        const status = { online: t('responding'), warning: t('warning'), offline: t('noResponse'), unknown: t('unknown') };
+        notify(deviceName(device, result.mock) + ': ' + (status[result.status as keyof typeof status] ?? t('unknown')) + (result.mock ? ' (' + t('mock') + ')' : ''));
       } else {
         await refresh();
-        notify('Đã làm mới dữ liệu SNMP.');
+        notify(t('polled'));
       }
     } catch (cause) {
-      notify(cause instanceof Error ? cause.message : 'Kiểm tra thất bại.');
+      notify(cause instanceof Error ? cause.message : t('probeError'));
     }
   }
 
@@ -319,25 +326,25 @@ function Dashboard() {
   function menuItems(anchor: MenuAnchor): MenuItem[] {
     const device = anchor.device;
     if (!device) return [
-      { label: 'Thêm thiết bị mới', action: () => setAction({ mode: 'add', position: flow.screenToFlowPosition({ x: anchor.x, y: anchor.y }) }) },
-      { label: 'Sắp xếp tự động', action: arrange },
-      { label: 'Căn giữa toàn bộ sơ đồ', action: fit },
-      { label: locked ? 'Mở khóa di chuyển node' : 'Khóa di chuyển node', action: () => setLocked(!locked) },
-      { label: 'Làm mới dữ liệu SNMP ngay', action: () => void runNetworkAction() },
-      { label: 'Xuất bố cục JSON', action: exportLayout },
+      { label: t('newDevice'), action: () => setAction({ mode: 'add', position: flow.screenToFlowPosition({ x: anchor.x, y: anchor.y }) }) },
+      { label: t('arrange'), action: arrange },
+      { label: t('fitAll'), action: fit },
+      { label: locked ? t('unlock') : t('lock'), action: () => setLocked(!locked) },
+      { label: t('forcePoll'), action: () => void runNetworkAction() },
+      { label: t('export'), action: exportLayout },
     ];
     return [
-      { label: 'Sửa thiết bị', action: () => setAction({ mode: 'edit', device }) },
-      { label: 'Thêm thiết bị con', action: () => setAction({ mode: 'add', device }) },
-      { label: 'Kiểm tra SNMP ngay', action: () => void runNetworkAction(device) },
-      { label: 'Sao chép địa chỉ IP', action: () => {
-        if (!navigator.clipboard) { notify('Trình duyệt không cấp quyền clipboard.'); return; }
-        void navigator.clipboard.writeText(device.ip).then(() => notify('Đã sao chép địa chỉ IP.'),
-          () => notify('Không sao chép được địa chỉ IP.'));
+      { label: t('edit'), action: () => setAction({ mode: 'edit', device }) },
+      { label: t('child'), action: () => setAction({ mode: 'add', device }) },
+      { label: t('probe'), action: () => void runNetworkAction(device) },
+      { label: t('copyIp'), action: () => {
+        if (!navigator.clipboard) { notify(t('clipboardUnavailable')); return; }
+        void navigator.clipboard.writeText(device.ip).then(() => notify(t('ipCopied')),
+          () => notify(t('copyError')));
       } },
-      { label: collapsed.has(device.id) ? 'Mở rộng nhánh con' : 'Thu gọn nhánh con',
+      { label: collapsed.has(device.id) ? t('expand') : t('collapse'),
         disabled: !snapshot?.devices.some(item => item.parent_id === device.id), action: () => toggleBranch(device.id) },
-      { label: 'Xóa thiết bị', danger: true, action: () => setAction({ mode: 'delete', device }) },
+      { label: t('delete'), danger: true, action: () => setAction({ mode: 'delete', device }) },
     ];
   }
 
@@ -345,35 +352,35 @@ function Dashboard() {
     <div className="dashboard" ref={root}>
       <SystemBar snapshot={snapshot} connected={connected} />
       <main>
-        <section className="canvas" aria-label="Sơ đồ mạng">
-          <div className="toolbar command-dock" aria-label="Công cụ sơ đồ">
-            <Tool icon={locked ? Lock : Unlock} label={locked ? 'Mở khóa kéo thả' : 'Khóa kéo thả'} pressed={locked} action={() => setLocked(!locked)} />
-            <Tool icon={Network} label="Tự sắp xếp" action={arrange} />
-            <Tool icon={Download} label="Xuất bố cục JSON" action={exportLayout} />
-            <Tool icon={Upload} label="Nhập bố cục JSON" action={() => importFile.current?.click()} />
+        <section className="canvas" aria-label={t('topology')}>
+          <div className="toolbar command-dock" aria-label={t('tools')}>
+            <Tool icon={locked ? Lock : Unlock} label={locked ? t('unlockDrag') : t('lockDrag')} pressed={locked} action={() => setLocked(!locked)} />
+            <Tool icon={Network} label={t('autoLayout')} action={arrange} />
+            <Tool icon={Download} label={t('export')} action={exportLayout} />
+            <Tool icon={Upload} label={t('import')} action={() => importFile.current?.click()} />
             <input hidden ref={importFile} type="file" accept=".json,application/json" onChange={event => {
               void importLayout(event.currentTarget.files?.[0]);
               event.currentTarget.value = '';
             }} />
-            <Tool icon={labels ? Eye : EyeOff} label="Nhãn lưu lượng trên dây" pressed={labels} action={() => setLabels(!labels)} />
-            <Tool icon={Search} label="Tìm thiết bị" pressed={searchOpen} action={() => { setSearchOpen(!searchOpen); setSearch(''); }} />
-            <Tool icon={Maximize} label="Toàn màn hình" pressed={fullscreen} action={() => void toggleFullscreen()} />
-            <Tool icon={RefreshCw} label="Làm mới dữ liệu" action={() => void refresh()} />
-            <Tool icon={Plus} label="Phóng to" action={() => void flow.zoomIn({ duration: 180 })} />
-            <Tool icon={Minus} label="Thu nhỏ" action={() => void flow.zoomOut({ duration: 180 })} />
-            <button className="tool zoom" title="Về 100%" aria-label="Về 100%" onClick={() => void flow.zoomTo(1, { duration: 180 })}>{Math.round(zoom * 100)}%</button>
-            <Tool icon={Focus} label="Căn giữa sơ đồ" action={fit} />
+            <Tool icon={labels ? Eye : EyeOff} label={t('edgeLabels')} pressed={labels} action={() => setLabels(!labels)} />
+            <Tool icon={Search} label={t('findDevice')} pressed={searchOpen} action={() => { setSearchOpen(!searchOpen); setSearch(''); }} />
+            <Tool icon={Maximize} label={t('fullscreen')} pressed={fullscreen} action={() => void toggleFullscreen()} />
+            <Tool icon={RefreshCw} label={t('refresh')} action={() => void refresh()} />
+            <Tool icon={Plus} label={t('zoomIn')} action={() => void flow.zoomIn({ duration: 180 })} />
+            <Tool icon={Minus} label={t('zoomOut')} action={() => void flow.zoomOut({ duration: 180 })} />
+            <button className="tool zoom" title={t('resetZoom')} aria-label={t('resetZoom')} onClick={() => void flow.zoomTo(1, { duration: 180 })}>{Math.round(zoom * 100)}%</button>
+            <Tool icon={Focus} label={t('fit')} action={fit} />
           </div>
           {searchOpen && <form className="search-box" onSubmit={event => { event.preventDefault(); focusMatch(); }}>
-            <input autoFocus placeholder="Tên thiết bị hoặc IP" aria-label="Tên thiết bị hoặc IP" value={search} onChange={event => setSearch(event.target.value)} />
-            <button type="submit" disabled={!match}>Tìm</button>
-            {query && !match && <small>Không thấy thiết bị trong các nhánh đang mở</small>}
+            <input autoFocus placeholder={t('searchHint')} aria-label={t('searchHint')} value={search} onChange={event => setSearch(event.target.value)} />
+            <button type="submit" disabled={!match}>{t('find')}</button>
+            {query && !match && <small>{t('noMatch')}</small>}
           </form>}
           <TopologyHoverContext.Provider value={emphasis}>
           <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
             onNodeContextMenu={(event, node) => {
               event.preventDefault();
-              setMenu({ x: event.clientX, y: event.clientY, device: node.data.device });
+              setMenu({ x: event.clientX, y: event.clientY, device: { ...node.data.device, name: deviceName(node.data.device, snapshot?.mock) } });
             }}
             onPaneContextMenu={event => {
               event.preventDefault();
@@ -453,11 +460,11 @@ function Dashboard() {
             </ViewportPortal>}
           </ReactFlow>
           </TopologyHoverContext.Provider>
-          {!snapshot && <p className="canvas-message" role="status">{error ? 'Không tải được dữ liệu. Hãy thử làm mới.' : 'Đang tải sơ đồ mạng…'}</p>}
-          {snapshot && error && <p className="canvas-message" role="status">Đang hiển thị dữ liệu lần cập nhật trước.</p>}
+          {!snapshot && <p className="canvas-message" role="status">{error ? t('loadError') : t('loading')}</p>}
+          {snapshot && error && <p className="canvas-message" role="status">{t('stale')}</p>}
           {layoutMessage && <p className="canvas-message" role="status">{layoutMessage}</p>}
-          {fullscreenError && <p className="canvas-message" role="status">Trình duyệt không thể mở toàn màn hình.</p>}
-          <div className="legend"><span><i className="indicator live" />Online</span><span><i className="indicator warn" />Tải cao</span><span><i className="indicator off" />Offline</span></div>
+          {fullscreenError && <p className="canvas-message" role="status">{t('fullscreenError')}</p>}
+          <div className="legend"><span><i className="indicator live" />{t('online')}</span><span><i className="indicator warn" />{t('warning')}</span><span><i className="indicator off" />{t('offline')}</span></div>
         </section>
       </main>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} close={() => setMenu(undefined)} />}
@@ -481,5 +488,5 @@ function Dashboard() {
   );
 }
 
-createRoot(document.getElementById('root')!).render(window.location.pathname === '/devices'
-  ? <DeviceSettings /> : <ReactFlowProvider><Dashboard /></ReactFlowProvider>);
+createRoot(document.getElementById('root')!).render(<LanguageProvider>{window.location.pathname === '/devices'
+  ? <DeviceSettings /> : <ReactFlowProvider><Dashboard /></ReactFlowProvider>}</LanguageProvider>);

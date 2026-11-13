@@ -1,3 +1,4 @@
+import { useLanguage } from './language';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 
 export type MenuItem = { label: string; action: () => void; danger?: boolean; disabled?: boolean };
@@ -5,6 +6,7 @@ export type MenuItem = { label: string; action: () => void; danger?: boolean; di
 export function ContextMenu({ x, y, items, close }: {
   x: number; y: number; items: MenuItem[]; close: () => void;
 }) {
+  const { t } = useLanguage();
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(close);
   closeRef.current = close;
@@ -34,7 +36,7 @@ export function ContextMenu({ x, y, items, close }: {
     };
   }, []);
 
-  return <div ref={ref} className="topology-menu" role="menu" aria-label="Thao tác sơ đồ"
+  return <div ref={ref} className="topology-menu" role="menu" aria-label={t('menu')}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;

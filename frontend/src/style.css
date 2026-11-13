@@ -145,3 +145,8 @@ main { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 }
 .shift-snap-guide { position: absolute; inset: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .traffic-anchor { fill: #a5f3fc; filter: drop-shadow(0 0 2px #22d3ee); pointer-events: none; }
+
+.language-switch { display: inline-flex; align-items: center; gap: 4px; font: 600 11px ui-monospace, monospace; white-space: nowrap; }
+.language-switch button { padding: 4px; color: var(--muted); }
+.language-switch button[aria-pressed="true"] { color: #67e8f9; text-decoration: underline; text-underline-offset: 4px; }
+.device-settings > .language-switch { margin-left: 12px; }
