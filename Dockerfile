@@ -17,7 +17,7 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/backend/dist ./backend/dist
 COPY --from=builder /app/frontend/dist ./frontend/dist
-RUN mkdir -p /app/data && chown node:node /app/data
+RUN apk add --no-cache iputils-ping && mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3000
 CMD ["node", "backend/dist/main.js"]

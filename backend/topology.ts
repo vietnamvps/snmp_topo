@@ -44,17 +44,17 @@ function liveRates(device: Device, parent: Device | undefined,
   } else if (parent) {
     const port = ports.get(parent.id)?.get(parent.interface_map[device.id]);
     if (port) {
-      const status = !port.up ? 'offline' : device.snmp && !sampled ? 'unknown' : 'online';
+      const status = !port.up ? 'offline' : device.monitor_mode === 'snmp' && !sampled ? 'unknown' : 'online';
       return { down_bps: port.tx_bps, up_bps: port.rx_bps, status };
     }
   }
-  return { down_bps: null, up_bps: null, status: sampled ? 'online' : device.snmp ? 'offline' : 'unknown' };
+  return { down_bps: null, up_bps: null, status: sampled ? 'online' : device.monitor_mode === 'snmp' ? 'offline' : 'unknown' };
 }
 
 export type TrafficHistory = Map<string, (number | null)[]>;
 
 export function buildTopology(devices: Device[], samples: Map<string, Sample>,
-  previous: Map<string, Sample>, mock: boolean, speedtest: Speedtest | null, history: TrafficHistory = new Map(), record = false) {
+  previous: Map<string, Sample>, mock: boolean, speedtest: Speedtest | null, history: TrafficHistory = new Map(), record = false, reachable = new Map<string, boolean>()) {
   const byId = new Map(devices.map(device => [device.id, device]));
   const ports = new Map(devices.map(({ id }) => [id, interfaceData(samples.get(id), previous.get(id))]));
   const now = performance.now() / 1000;
@@ -69,8 +69,11 @@ export function buildTopology(devices: Device[], samples: Map<string, Sample>,
     const portSample = kind === 'firewall' ? sample : parent ? samples.get(parent.id) : undefined;
     const speed = index == null ? undefined : portSample?.tables.speed?.get(String(index));
     const capacity = typeof speed === 'number' && speed > 0 ? speed * 1e6 : null;
-    const status = capacity && rates.status === 'online' &&
-      Math.max(rates.down_bps ?? 0, rates.up_bps ?? 0) > capacity * 0.75 ? 'warning' : rates.status;
+    const monitoredStatus = !mock && device.enabled && device.monitor_mode === 'icmp'
+      ? reachable.has(id) ? reachable.get(id) ? 'online' : 'offline' : 'unknown'
+      : !device.enabled ? 'unknown' : rates.status;
+    const status = device.monitor_mode !== 'icmp' && capacity && monitoredStatus === 'online' &&
+      Math.max(rates.down_bps ?? 0, rates.up_bps ?? 0) > capacity * 0.75 ? 'warning' : monitoredStatus;
     const port = index == null ? undefined : ports.get(kind === 'firewall' ? id : parent?.id ?? '')?.get(index);
     return {
       id, name, ip, kind, parent_id, ...rates, status,

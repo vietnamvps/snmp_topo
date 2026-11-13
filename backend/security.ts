@@ -120,7 +120,7 @@ export function configureSecurity(app: Express, mock: boolean, host: string, acc
     } else if (request.method === 'OPTIONS' && request.headers.origin && allowedOrigins.has(request.headers.origin)) {
       response.vary('Origin').set({
         'Access-Control-Allow-Origin': request.headers.origin,
-        'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, PUT, POST, PATCH, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Device-Config',
       }).sendStatus(204);
     } else {
@@ -148,10 +148,5 @@ export function configureSecurity(app: Express, mock: boolean, host: string, acc
     else response.redirect('/login');
   });
 
-  function canManageDevices(request: IncomingMessage) {
-    const user = session(request);
-    return user ? user.role === 'admin' : authenticated(request);
-  }
-
-  return { authenticated, session, sessionToken, originAllowed, withinRateLimit, canManageDevices };
+  return { authenticated, session, sessionToken, originAllowed, withinRateLimit };
 }

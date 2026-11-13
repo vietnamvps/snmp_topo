@@ -11,7 +11,10 @@ type Device = {
   ip: string;
   kind: Kind;
   parent_id: string | null;
-  interface_map: Record<string, number>;
+  interface_map?: Record<string, number>;
+  parent_if_index?: number | null;
+  monitor_mode: 'snmp' | 'icmp' | 'none';
+  enabled?: boolean;
   wan_interface?: number | null;
   ports: number;
   snmp?: 'v2c' | 'v3' | null;
@@ -24,7 +27,7 @@ type Device = {
   privacy_protocol?: 'aes' | 'aes256b' | 'aes256r';
 };
 
-type Config = { devices: Device[]; revision: string };
+type Config = { devices: Device[]; changes?: { action: string; id: string }[] };
 type Interface = { index: number; name: string; up: boolean };
 type Observed = { id: string; ip: string; interfaces: Interface[] };
 
@@ -48,11 +51,10 @@ function interfaceOptions(observed: Observed[], device: Device | undefined) {
   return observed.find(item => item.id === device?.id && item.ip === device.ip)?.interfaces ?? [];
 }
 
-async function requestConfig(options: RequestInit = {}): Promise<Config> {
-  const response = await fetch('/api/device-config', options);
-  const data = await response.json();
+async function requestConfig(options: RequestInit = {}, path = ''): Promise<Config> {
+  const response = await fetch('/api/devices' + path, options);
   if (!response.ok) throw new Error(apiErrorKey(response.status, 'configError'));
-  return data;
+  return response.json();
 }
 
 type SettingsProps = {
@@ -70,7 +72,7 @@ function translationError(value: string, fallback: TranslationKey): TranslationK
 
 function newDevice(parent_id: string | null): Device {
   return {
-    id: 'node-' + crypto.randomUUID(), name: '', ip: '', kind: 'switch', parent_id, interface_map: {},
+    id: 'node-' + Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, '0')).join(''), name: '', ip: '', kind: 'switch', parent_id, monitor_mode: 'icmp',
     ports: 1, port: 161, community_env: 'SNMP_COMMUNITY',
     auth_env: 'SNMP_V3_AUTH_KEY', privacy_env: 'SNMP_V3_PRIV_KEY',
   };
@@ -81,7 +83,8 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
   const [mock, setMock] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [selected, setSelected] = useState('');
-  const [revision, setRevision] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [savedIds, setSavedIds] = useState<string[]>([]);
   const [observed, setObserved] = useState<Observed[]>([]);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -94,6 +97,8 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
   useEffect(() => {
     const controller = new AbortController();
     requestConfig({ signal: controller.signal }).then(config => {
+      setSavedIds(config.devices.map(item => item.id));
+      setLoaded(true);
       if (mode === 'add') {
         if (parentId && !config.devices.some(item => item.id === parentId)) {
           throw new Error('missingParent');
@@ -101,12 +106,12 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
         const draft = newDevice(parentId ?? null);
         setDevices([...config.devices, draft]);
         setSelected(draft.id);
-        setRevision(config.revision);
+
         return;
       }
       setDevices(config.devices);
       setSelected(nodeId ?? config.devices[0]?.id ?? '');
-      setRevision(config.revision);
+
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(cause instanceof Error ? translationError(cause.message, 'loadConfigError') : 'loadConfigError');
     });
@@ -152,13 +157,7 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
   }
 
   function connect(parentId: string | null, index?: number) {
-    edit(devices.map(item => {
-      if (item.id === selected) return { ...item, parent_id: parentId };
-      const interface_map = { ...item.interface_map };
-      if (item.id === parentId && index !== undefined) interface_map[selected] = index;
-      else delete interface_map[selected];
-      return { ...item, interface_map };
-    }));
+    patch({ parent_id: parentId, parent_if_index: index ?? null });
   }
 
   function addDevice() {
@@ -167,51 +166,53 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
     setSelected(draft.id);
   }
 
+  const hasChildren = devices.some(item => item.parent_id === selected);
+  const headers = { 'Content-Type': 'application/json', 'X-Device-Config': '1' };
+
   function removeDevice() {
-    if (!device || busy || devices.length <= 1) return;
-    const hasChildren = devices.some(item => item.parent_id === device.id);
-    if (!mode && !window.confirm(hasChildren
-      ? t('deleteChildren')
-      : t('deleteConfirm'))) return;
-    const next = devices.filter(item => item.id !== device.id).map(item => {
-      const interface_map = { ...item.interface_map };
-      delete interface_map[device.id];
-      return { ...item, interface_map, parent_id: item.parent_id === device.id ? null : item.parent_id };
-    });
-    if (mode === 'delete') {
-      void persist(next);
+    if (!device || busy || hasChildren || (!mode && !window.confirm(t('deleteConfirm')))) return;
+    if (!savedIds.includes(device.id)) {
+      const next = devices.filter(item => item.id !== device.id);
+      setDevices(next);
+      setSelected(next[0]?.id ?? '');
+      setDirty(false);
       return;
     }
-    edit(next);
-    setSelected(next[0]?.id ?? '');
+    void persist(() => requestConfig({ method: 'DELETE', headers }, '/' + device.id), true);
   }
 
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (busy || !dirty) return;
-    const invalid = devices.find(item => !item.name.trim() || !item.ip.trim());
-    if (invalid) {
-      setSelected(invalid.id);
-      setError('requiredFields');
-      return;
-    }
-    await persist(devices);
+    if (busy || !dirty || !device) return;
+    const { id, interface_map: _map, ...fields } = device;
+    const exists = savedIds.includes(id);
+    await persist(() => requestConfig({
+      method: exists ? 'PATCH' : 'POST', headers, body: JSON.stringify(exists ? fields : { id, ...fields }),
+    }, exists ? '/' + id : ''));
   }
 
-  async function persist(next: Device[]) {
+  async function importYaml(file: File) {
+    await persist(async () => {
+      if (file.size > 256 * 1024) throw new Error('invalidConfig');
+      const options = { method: 'POST', headers: { ...headers, 'Content-Type': 'application/yaml' }, body: await file.text() };
+      const preview = await requestConfig(options, '/import?dryRun=true');
+      const changes = preview.changes ?? [];
+      if (!changes.length || !window.confirm(t('importConfirm') + '\n' +
+        changes.map(change => t(change.action === 'create' ? 'add' : change.action === 'update' ? 'edit' : 'delete') + ' · ' + change.id).join('\n'))) return;
+      return requestConfig(options, '/import?dryRun=false');
+    }, true);
+  }
+
+  async function persist(operation: () => Promise<Config | undefined>, resetSelection = false) {
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const saved = await requestConfig({
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Device-Config': '1' },
-        body: JSON.stringify({ revision, devices: next.map(item => ({
-          ...item, name: item.name.trim(), ip: item.ip.trim(), username: item.username?.trim(),
-        })) }),
-      });
+      const saved = await operation();
+      if (!saved) return;
       setDevices(saved.devices);
-      setRevision(saved.revision);
+      setSavedIds(saved.devices.map(item => item.id));
+      if (resetSelection) setSelected(saved.devices[0]?.id ?? '');
       setDirty(false);
       setMessage('saved');
       onSaved?.(selected);
@@ -224,14 +225,13 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
 
   if (mode === 'delete') {
     return <section className="config-delete-panel">
-      {!device && !error && <p>{revision ? t('missingDevice') : t('loadingDevice')}</p>}
+      {!device && !error && <p>{loaded ? t('missingDevice') : t('loadingDevice')}</p>}
       {device && <p>{t('delete')} · <strong>{deviceName(device, mock)}</strong>?
-        {devices.some(item => item.parent_id === device.id) && ' ' + t('childrenBecomeRoots')}
+        {hasChildren && ' ' + t('moveChildrenFirst')}
       </p>}
-      {device && devices.length === 1 && <p>{t('minimumDevices')}</p>}
       {error && <p className="config-error" role="alert">{t(error)}</p>}
       <button className="config-button config-delete" type="button" onClick={removeDevice}
-        disabled={busy || !device || devices.length <= 1}>
+        disabled={busy || !device || hasChildren}>
         <Trash2 size={16} /> {busy ? t('deleting') : t('confirmDelete')}
       </button>
     </section>;
@@ -244,7 +244,15 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
       <LanguageSwitch />
       <header className="config-heading">
         <div><h1>{t('settings')}</h1><p>{t('settingsHint')}</p></div>
-        <button className="config-button" onClick={addDevice} disabled={!revision || busy}><Plus size={17} /> {t('add')}</button>
+        <button className="config-button" onClick={addDevice} disabled={!loaded || busy || dirty}><Plus size={17} /> {t('add')}</button>
+        {loaded && <a className="config-button" href="/api/devices/export">{t('exportYaml')}</a>}
+        <label className="config-button">{t('importYaml')}
+          <input type="file" accept=".yaml,.yml" disabled={!loaded || busy || dirty} onChange={event => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (file) void importYaml(file);
+          }} />
+        </label>
       </header>
       </>}
       <div className="config-layout">
@@ -252,7 +260,7 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
           <h2>{t('devices')} <span>{devices.length}</span></h2>
           {devices.map(item => (
             <button key={item.id} className="config-item" aria-current={item.id === selected}
-              disabled={busy} onClick={() => setSelected(item.id)}>
+              disabled={busy || dirty} onClick={() => setSelected(item.id)}>
               <strong>{deviceName(item, mock) || t('untitled')}</strong>
               <small>{t(item.kind)} · {item.ip || t('noAddress')}</small>
             </button>
@@ -281,7 +289,7 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
                 </select></label>
                 <label>{t('parentPort')}
                   <input type="number" min="1" list="parent-interfaces" disabled={!parent}
-                    placeholder="ifIndex" value={parent?.interface_map[device.id] ?? ''}
+                    placeholder="ifIndex" value={device.parent_if_index ?? ''}
                     onChange={event => connect(parent?.id ?? null, event.target.value ? Number(event.target.value) : undefined)} />
                   <datalist id="parent-interfaces">{interfaceOptions(observed, parent).map(port => (
                     <option key={port.index} value={port.index}>{port.name} · {port.up ? t('up') : t('down')}</option>
@@ -298,14 +306,21 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
               </div>
               <h2>SNMP</h2>
               <div className="config-fields">
-                <label>{t('version')}<select value={device.snmp ?? ''} onChange={event => patch({ snmp: event.target.value as Device['snmp'] || null })}>
-                  <option value="">{t('disabled')}</option><option value="v2c">SNMP v2c</option><option value="v3">SNMP v3</option>
+                <label>{t('monitorMode')}<select value={device.monitor_mode} onChange={event => {
+                  const monitor_mode = event.target.value as Device['monitor_mode'];
+                  patch({ monitor_mode, snmp: monitor_mode === 'snmp' ? device.snmp ?? 'v2c' : null });
+                }}>
+                  <option value="snmp">SNMP</option><option value="icmp">ICMP</option>
+                  <option value="none">{t('disabled')}</option>
                 </select></label>
-                {device.snmp && <label>{t('udpPort')}<input type="number" min="1" max="65535" required value={device.port || ''}
+                {device.monitor_mode === 'snmp' && <label>{t('version')}<select value={device.snmp ?? ''} onChange={event => patch({ snmp: event.target.value as Device['snmp'] || null })}>
+                  <option value="v2c">SNMP v2c</option><option value="v3">SNMP v3</option>
+                </select></label>}
+                {device.monitor_mode === 'snmp' && device.snmp && <label>{t('udpPort')}<input type="number" min="1" max="65535" required value={device.port || ''}
                   onChange={event => patch({ port: Number(event.target.value) })} /></label>}
-                {device.snmp === 'v2c' && <label>{t('communityVar')}<input required value={device.community_env}
+                {device.monitor_mode === 'snmp' && device.snmp === 'v2c' && <label>{t('communityVar')}<input required value={device.community_env}
                   onChange={event => patch({ community_env: event.target.value })} /></label>}
-                {device.snmp === 'v3' && <>
+                {device.monitor_mode === 'snmp' && device.snmp === 'v3' && <>
                   <label>{t('username')}<input required value={device.username ?? ''} onChange={event => patch({ username: event.target.value })} /></label>
                   <label>{t('authAlgorithm')}<select value={device.auth_protocol ?? 'sha256'}
                     onChange={event => patch({ auth_protocol: event.target.value as 'sha' | 'sha256' | 'sha512' })}>
@@ -322,11 +337,11 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
               {device.snmp && <p className="config-hint">{t('secretHint')}</p>}
             </>}
           </fieldset>
-          {!device && <p>{revision ? (nodeId ? t('missingDevice') : t('addToStart')) : t('loadingConfig')}</p>}
+          {!device && <p>{loaded ? (nodeId ? t('missingDevice') : t('addToStart')) : t('loadingConfig')}</p>}
           {error && <p className="config-error" role="alert">{t(error)}</p>}
           {message && <p className="config-success" role="status">{t(message)}</p>}
           <footer className="config-actions">
-            {!mode && <button className="config-button config-delete" type="button" disabled={busy || !device || devices.length <= 1}
+            {!mode && <button className="config-button config-delete" type="button" disabled={busy || !device || hasChildren}
               onClick={removeDevice}><Trash2 size={16} /> {t('delete')}</button>}
             <button className="config-button config-save" type="submit" disabled={busy || !dirty}><Save size={16} />
               {busy ? t('saving') : t('save')}</button>

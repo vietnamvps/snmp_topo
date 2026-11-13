@@ -7,7 +7,6 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: "3000"
-      DEVICES_READ_ONLY: 'true'
       DEVICES_FILE: /app/config/devices.yaml
     ports:
       # To expose to a LAN, set BIND_IP to the server LAN IP and restrict access at the firewall.
@@ -19,8 +18,8 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: ./config/devices.yaml
-        target: /app/config/devices.yaml
+        source: ./config
+        target: /app/config
         read_only: true
         bind:
           create_host_path: false

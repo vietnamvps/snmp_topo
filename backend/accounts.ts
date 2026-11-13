@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { migrateDevices, openDevices } from './devices.js';
 import { projectRoot } from './configuration.js';
 
 export const usernameSchema = z.string().trim().regex(/^[a-zA-Z0-9_.-]{1,64}$/);
@@ -36,7 +37,7 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
   db.exec('BEGIN IMMEDIATE');
   try {
     const version = Number(db.pragma('user_version', { simple: true }));
-    if (version > 1) throw new Error('Account database schema is newer than this application');
+    if (version > 2) throw new Error('Account database schema is newer than this application');
     if (version === 0) db.exec(`
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -55,6 +56,7 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
       );
       PRAGMA user_version=1;
     `);
+    if (version < 2) migrateDevices(db);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -65,9 +67,14 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
   const byName = (name: string) => db.prepare('SELECT * FROM users WHERE username = ?').get(name) as User | undefined;
   const revoke = (id: number) => db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
   const hasUsers = () => Boolean(db.prepare('SELECT 1 FROM users LIMIT 1').get());
-  const insert = (username: string, hash: string, role: Role) =>
-    db.prepare('INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)')
+  const userAudit = (actor: number | null, action: string, id: number | bigint, diff: object) =>
+    db.prepare("INSERT INTO audit_log(user_id,action,entity,entity_id,diff_json,at) VALUES(?,?,'user',?,?,?)")
+      .run(actor, action, String(id), JSON.stringify(diff), Date.now());
+  const insert = (username: string, hash: string, role: Role, actor: number | null = null) => {
+    const result = db.prepare('INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)')
       .run(username, hash, role, Date.now());
+    userAudit(actor, 'create', result.lastInsertRowid, { after: { username, role, disabled: false } });
+  };
   const keepAdmin = (id: number) => Boolean(db.prepare(
     "SELECT 1 FROM users WHERE role='admin' AND disabled=0 AND id<>? LIMIT 1").get(id));
   function transaction<T>(operation: () => T) {
@@ -83,6 +90,7 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
   }
 
   return {
+    devices: openDevices(db),
     db, hasUsers, byName,
     async bootstrap() {
       if (hasUsers() || (!process.env.ADMIN_USERNAME && !process.env.ADMIN_PASSWORD)) return;
@@ -91,12 +99,12 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
       const hash = await hashPassword(password);
       transaction(() => { if (!hasUsers()) insert(username, hash, 'admin'); });
     },
-    async create(username: string, password: string, role: Role) {
+    async create(username: string, password: string, role: Role, actor: number | null = null) {
       const hash = await hashPassword(password);
       return transaction(() => {
         if (byName(username)) return false;
         if (!hasUsers() && role !== 'admin') return false;
-        insert(username, hash, role);
+        insert(username, hash, role, actor);
         return true;
       });
     },
@@ -130,14 +138,17 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
         const result = expectedHash === undefined
           ? db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hash, id)
           : db.prepare('UPDATE users SET password_hash=? WHERE id=? AND password_hash=? AND disabled=0').run(hash, id, expectedHash);
-        if (result.changes) revoke(id);
+        if (result.changes) {
+          revoke(id);
+          userAudit(expectedHash === undefined ? null : id, 'update', id, { passwordChanged: true });
+        }
         return Boolean(result.changes);
       });
     },
     users() {
       return db.prepare('SELECT id,username,role,disabled,created_at,last_login_at FROM users ORDER BY username').all();
     },
-    update(id: number, changes: { role?: Role; disabled?: boolean }, remove = false) {
+    update(id: number, changes: { role?: Role; disabled?: boolean }, remove = false, actor: number | null = null) {
       return transaction(() => {
         const user = db.prepare('SELECT * FROM users WHERE id=?').get(id) as User | undefined;
         if (!user) return 404;
@@ -147,6 +158,10 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
         if (remove) db.prepare('DELETE FROM users WHERE id=?').run(id);
         else db.prepare('UPDATE users SET role=?, disabled=? WHERE id=?').run(role, Number(disabled), id);
         if (remove || disabled || role !== user.role) revoke(id);
+        userAudit(actor, remove ? 'delete' : 'update', id, {
+          before: { username: user.username, role: user.role, disabled: Boolean(user.disabled) },
+          after: remove ? null : { username: user.username, role, disabled },
+        });
         return 204;
       });
     },

@@ -36,7 +36,7 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 if (!(Test-Path config/devices.yaml)) { Copy-Item config/devices.example.yaml config/devices.yaml }
 ```
 
-For live mode, set `ADMIN_USERNAME` and `ADMIN_PASSWORD` before the first start. Use a unique password of at least 12 characters. Install dependencies and start the dashboard:
+To edit devices in either mock or live mode, set `ADMIN_USERNAME` and `ADMIN_PASSWORD` before the first start. Use a unique password of at least 12 characters. Install dependencies and start the dashboard:
 
 ```sh
 npm ci --include=dev
@@ -47,7 +47,7 @@ Use `npm.cmd` in PowerShell if script execution is restricted. Open the loopback
 
 ### Run with Docker Compose
 
-Create the same two local configuration files. On Linux, prepare the persistent SQLite directory for UID 1000, then start Compose:
+Create the same two local configuration files. The YAML seed is optional. On Linux, prepare the persistent SQLite directory for UID 1000, then start Compose:
 
 ```sh
 sudo install -d -o 1000 -g 1000 -m 0700 data
@@ -55,7 +55,11 @@ docker compose up -d --build
 docker compose logs -f opnsense-monitor
 ```
 
-Compose publishes port 3000 on loopback by default. Set `BIND_IP` and `PUBLISH_PORT` in `.env` to change the host address and port. The container runs as an unprivileged user and mounts `config/devices.yaml` read-only. Give the container user read access to that file. To change device configuration, edit the host file and run `docker compose up -d --force-recreate`.
+Compose publishes port 3000 on loopback by default. Set `BIND_IP` and `PUBLISH_PORT` in `.env` to change the host address and port. The container runs as an unprivileged user. Compose mounts `./config:/app/config:ro` for the optional seed and `./data:/app/data` for persistent SQLite data. Keep the same `DATABASE_FILE` when upgrading an existing installation.
+
+## Manage devices
+
+On the first start with an empty device database, the dashboard imports `DEVICES_FILE` (default `config/devices.yaml`) if it exists. Legacy devices without a SNMP version become ICMP devices. SQLite then supplies the topology and records configuration changes. Sign in as an admin and edit a device from its context menu, or open **Devices** to export or import YAML. Import previews the changes before replacing the device list. The poller picks up changes automatically. Set `DEVICES_READ_ONLY=true` to block device mutations. On a direct installation, ICMP requires the system `ping` utility.
 
 ## Connect OPNsense
 

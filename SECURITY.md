@@ -28,3 +28,6 @@ Dùng ALLOWED_ORIGINS để cho phép các origin cụ thể, phân tách bằng
 Set `ALLOW_INSECURE_LAN_HTTP=true` and set `DASHBOARD_ORIGIN` to the exact HTTP origin, including the published port. Use a private or loopback IP literal. Live mode still requires token authentication. Restrict access to trusted clients because HTTP sends credentials and telemetry without transport encryption.
 
 Giữ thư mục SQLite và bản sao lưu ngoài Git. Tài khoản dịch vụ cần quyền ghi riêng vào thư mục dữ liệu. Xóa biến bootstrap sau khi tạo admin. Chế độ mock giữ quyền xem và chỉnh thiết bị mẫu khi chưa đăng nhập.
+
+- Device inventory lives in SQLite. Admin device changes record before/after values in the audit log. YAML exports and audit records include SNMP environment-variable names only. Keep exported topology files private because they contain management addresses.
+- Compose mounts the configuration directory read-only for one-time seeding. Preserve the existing SQLite data directory when upgrading. `DEVICES_READ_ONLY=true` blocks device mutations through the API.

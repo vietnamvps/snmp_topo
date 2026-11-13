@@ -3,7 +3,9 @@ import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import express from 'express';
 import { WebSocket, WebSocketServer } from 'ws';
-import { DeviceConfigError, loadDevices, projectRoot, saveDevices } from './configuration.js';
+import { projectRoot, type Device } from './configuration.js';
+import { deviceRoutes } from './device-routes.js';
+import { probeIcmp } from './icmp.js';
 import { openAccounts } from './accounts.js';
 import { configureSecurity } from './security.js';
 import { pollSnmp, probeSnmp, type Sample } from './snmp.js';
@@ -15,7 +17,9 @@ function envNumber(name: string, fallback: number, minimum: number) {
   return Math.max(minimum, value);
 }
 
-let devices = loadDevices();
+const accounts = openAccounts();
+accounts.devices.seed();
+let devices = accounts.devices.read();
 let revision = randomUUID();
 const mock = (process.env.MOCK_MODE ?? 'true').trim().toLowerCase() === 'true';
 const interval = envNumber('POLL_INTERVAL', 3, 0.5) * 1000;
@@ -38,52 +42,23 @@ const shutdown = new AbortController();
 
 const app = express();
 app.disable('x-powered-by');
-const accounts = openAccounts();
 const security = configureSecurity(app, mock, host, accounts);
 await accounts.bootstrap();
-if (!mock && !accounts.hasUsers()) console.warn('No accounts configured. Set ADMIN_USERNAME and ADMIN_PASSWORD or run user:create.');
+if (!accounts.hasUsers()) console.warn('No accounts configured. Set ADMIN_USERNAME and ADMIN_PASSWORD or run user:create.');
 accounts.prune();
 const cleanupTimer = setInterval(() => accounts.prune(), 60_000).unref();
 app.get('/healthz', (_request, response) => response.json({ status: 'ok' }));
 app.get('/api/topology', (_request, response) => response.set('Cache-Control', 'no-store').json(snapshot));
-app.get('/api/device-config', (_request, response) => {
-  response.set('Cache-Control', 'no-store').json({ devices, revision });
-});
-app.put('/api/device-config', express.json({ limit: '256kb' }), (request, response) => {
-  if (!security.canManageDevices(request)) {
-    response.sendStatus(403);
-    return;
-  }
-  if (process.env.DEVICES_READ_ONLY === 'true') {
-    response.status(403).json({ error: 'Cấu hình được gắn chỉ đọc. Sửa tệp trên máy chủ rồi khởi động lại dịch vụ.' });
-    return;
-  }
-  if (!request.is('application/json') || request.get('X-Device-Config') !== '1') {
-    response.status(415).json({ error: 'Yêu cầu lưu cấu hình không hợp lệ.' });
-    return;
-  }
-  if (request.body?.revision !== revision) {
-    response.status(409).json({ error: 'Cấu hình đã thay đổi. Tải lại trang trước khi chỉnh sửa tiếp.' });
-    return;
-  }
-  try {
-    devices = saveDevices(request.body);
-  } catch (error) {
-    if (error instanceof DeviceConfigError) {
-      response.status(400).json({ error: error.message });
-    } else {
-      console.error('Device configuration write failed');
-      response.status(500).json({ error: 'Không ghi được cấu hình thiết bị.' });
-    }
-    return;
-  }
+function reloadDevices() {
+  devices = accounts.devices.read();
   revision = randomUUID();
   previous.clear();
   history.clear();
   metadataCache.clear();
   publish(new Map(), false);
-  response.json({ devices, revision });
-});
+  void requestPoll();
+}
+
 app.post('/api/poll', async (request, response) => {
   if (request.get('X-Device-Config') !== '1') {
     response.sendStatus(403);
@@ -107,22 +82,24 @@ app.post('/api/devices/:id/probe', async (request, response) => {
     response.json({ mock: true, status: snapshot.devices.find(item => item.id === device.id)?.status ?? 'unknown' });
     return;
   }
-  if (!device.snmp) {
-    response.status(422).json({ error: 'Thiết bị chưa bật SNMP trong cấu hình.' });
+  if (!device.enabled || device.monitor_mode === 'none') {
+    response.status(422).json({ error: 'Thiết bị chưa bật giám sát.' });
     return;
   }
   if (activeProbes.has(device.id) || activeProbes.size >= 8) {
-    response.status(429).json({ error: 'Đang kiểm tra SNMP. Hãy thử lại sau.' });
+    response.status(429).json({ error: 'Đang kiểm tra thiết bị. Hãy thử lại sau.' });
     return;
   }
   activeProbes.add(device.id);
   try {
-    const online = await probeSnmp(device).catch(() => false);
+    const online = await (device.monitor_mode === 'icmp' ? probeIcmp(device) : probeSnmp(device)).catch(() => false);
     response.json({ mock: false, status: online ? 'online' : 'offline' });
   } finally {
     activeProbes.delete(device.id);
   }
 });
+
+app.use('/api/devices', deviceRoutes(accounts.devices, security, reloadDevices));
 
 app.use(express.static(resolve(projectRoot, 'frontend/dist')));
 app.get(['/devices', '/users'], (_request, response) => response.sendFile(resolve(projectRoot, 'frontend/dist/index.html')));
@@ -169,14 +146,26 @@ function requestPoll() {
   return activePoll;
 }
 
+async function pollIcmp(devices: Device[], reachable: Map<string, boolean>) {
+  const pending = devices.filter(device => device.enabled && device.monitor_mode === 'icmp');
+  await Promise.all(Array.from({ length: Math.min(16, pending.length) }, async () => {
+    for (let device = pending.pop(); device && !stopped; device = pending.pop()) {
+      reachable.set(device.id, await probeIcmp(device).catch(() => false));
+    }
+  }));
+}
+
 async function runPoller() {
   const pollRevision = revision;
-  const managed = devices.filter(device => device.snmp);
+  const managed = devices.filter(device => device.enabled && device.monitor_mode === 'snmp');
   const start = performance.now();
   const samples = new Map<string, Sample>();
+  const reachable = new Map<string, boolean>();
   if (!mock) {
+    const pings = pollIcmp(devices, reachable);
     const results = await Promise.allSettled(managed.map(device =>
       pollSnmp(device, cycle % 20 === 0 || !metadataCache.has(device.id))));
+    await pings;
     if (stopped) return;
     if (pollRevision !== revision) {
       pollTimer = setTimeout(requestPoll, 0);
@@ -199,13 +188,13 @@ async function runPoller() {
     });
   }
   if (stopped) return;
-  publish(samples);
+  publish(samples, true, reachable);
   cycle += 1;
   pollTimer = setTimeout(requestPoll, Math.max(0, interval - (performance.now() - start)));
 }
 
-function publish(samples: Map<string, Sample>, record = true) {
-  snapshot = buildTopology(devices, samples, previous, mock, speedtest, history, record);
+function publish(samples: Map<string, Sample>, record = true, reachable = new Map<string, boolean>()) {
+  snapshot = buildTopology(devices, samples, previous, mock, speedtest, history, record, reachable);
   previous = samples;
   const payload = JSON.stringify(snapshot);
   for (const client of streams.clients) {

@@ -100,18 +100,18 @@ export function mountAccountRoutes(app: Express, accounts: Accounts, cookieName:
     if (pending >= 4) { response.sendStatus(429); return; }
     pending++;
     try {
-      response.sendStatus(await accounts.create(input.data.username, input.data.password, input.data.role) ? 201 : 409);
+      response.sendStatus(await accounts.create(input.data.username, input.data.password, input.data.role, session(request)?.id) ? 201 : 409);
     } finally { pending--; }
   });
   router.patch('/users/:id', json, (request, response) => {
     const id = z.coerce.number().int().positive().safeParse(request.params.id);
     const changes = userChanges.safeParse(request.body);
     if (!id.success || !changes.success) { response.sendStatus(400); return; }
-    response.sendStatus(accounts.update(id.data, changes.data));
+    response.sendStatus(accounts.update(id.data, changes.data, false, session(request)?.id));
   });
   router.delete('/users/:id', (request, response) => {
     const id = z.coerce.number().int().positive().safeParse(request.params.id);
-    response.sendStatus(id.success ? accounts.update(id.data, {}, true) : 400);
+    response.sendStatus(id.success ? accounts.update(id.data, {}, true, session(request)?.id) : 400);
   });
 
   router.get('/layout', (request, response) => {
