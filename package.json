@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc -p backend/tsconfig.json && npm run build --workspace frontend",
     "dev": "npm start",
+    "test": "tsc -p backend/tsconfig.json && node --test tests/security.test.mjs",
     "prestart": "npm run build",
     "start": "node --env-file-if-exists=.env backend/dist/main.js"
   },

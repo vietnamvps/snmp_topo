@@ -1,5 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { BlockList, isIP } from 'node:net';
+import { z } from 'zod';
 import type { Express } from 'express';
 import express from 'express';
 
@@ -8,22 +10,33 @@ const cookieName = 'dashboard_session';
 const digest = (value: string) => createHash('sha256').update(value).digest();
 const equal = (left: string, right: string) => timingSafeEqual(digest(left), digest(right));
 
+const allowInsecureLanHttp = z.enum(['true', 'false']).default('false').transform(value => value === 'true');
+const lanAddresses = new BlockList();
+lanAddresses.addSubnet('10.0.0.0', 8);
+lanAddresses.addSubnet('172.16.0.0', 12);
+lanAddresses.addSubnet('192.168.0.0', 16);
+lanAddresses.addSubnet('127.0.0.0', 8);
+lanAddresses.addSubnet('fc00::', 7, 'ipv6');
+lanAddresses.addAddress('::1', 'ipv6');
+
+function isLanIp(hostname: string) {
+  const address = hostname.startsWith('[') ? hostname.slice(1, -1) : hostname;
+  const version = isIP(address);
+  return version !== 0 && lanAddresses.check(address, version === 4 ? 'ipv4' : 'ipv6');
+}
+
 export function configureSecurity(app: Express, mock: boolean, host: string) {
   const token = process.env.DASHBOARD_TOKEN ?? '';
   if (!mock && !/^[A-Za-z0-9_-]{32,256}$/.test(token)) {
     throw new Error('Live mode requires a random DASHBOARD_TOKEN (32–256 URL-safe characters)');
   }
-  const lanOrigin = process.env.DASHBOARD_LAN_ORIGIN;
-  if (lanOrigin) {
-    const url = new URL(lanOrigin);
-    if (url.origin !== lanOrigin || url.protocol !== 'http:' ||
-        !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)\d+\.\d+(?:\.\d+)?$/.test(url.hostname)) {
-      throw new Error('DASHBOARD_LAN_ORIGIN must be an HTTP origin with a private IPv4 address');
-    }
+  const allowHttp = allowInsecureLanHttp.parse(process.env.ALLOW_INSECURE_LAN_HTTP);
+  const configuredOrigin = process.env.DASHBOARD_ORIGIN;
+  const dashboardUrl = configuredOrigin ? new URL(configuredOrigin) : undefined;
+  const httpOrigin = dashboardUrl?.protocol === 'http:';
+  if (httpOrigin && (!allowHttp || !isLanIp(dashboardUrl.hostname))) {
+    throw new Error('HTTP DASHBOARD_ORIGIN requires ALLOW_INSECURE_LAN_HTTP=true and a private or loopback IP address');
   }
-  const httpsOrigin = process.env.DASHBOARD_ORIGIN;
-  if (httpsOrigin && lanOrigin) throw new Error('Configure only one dashboard origin');
-  const configuredOrigin = httpsOrigin || lanOrigin;
   const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean));
   if (configuredOrigin) allowedOrigins.add(configuredOrigin);
   for (const origin of allowedOrigins) {
@@ -33,8 +46,12 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
     }
   }
 
-  if (!mock && !['127.0.0.1', '::1', 'localhost'].includes(host) && !lanOrigin && !configuredOrigin?.startsWith('https:')) {
-    throw new Error('Live mode on a non-loopback bind requires HTTPS DASHBOARD_ORIGIN or explicit DASHBOARD_LAN_ORIGIN');
+  if (!mock && !['127.0.0.1', '::1', 'localhost'].includes(host) && !httpOrigin && dashboardUrl?.protocol !== 'https:') {
+    throw new Error('Live mode on a non-loopback bind requires HTTPS DASHBOARD_ORIGIN unless LAN HTTP is explicitly enabled');
+  }
+
+  if (httpOrigin) {
+    console.warn('ALLOW_INSECURE_LAN_HTTP enabled: dashboard credentials and session traffic are unencrypted.');
   }
 
   const sessionKey = randomBytes(32);
@@ -103,9 +120,8 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
         return;
       }
       const expires = String(Math.floor(now / 1000) + sessionSeconds);
-      const loopbackHttp = !configuredOrigin && /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(request.headers.origin);
       response.cookie(cookieName, expires + '.' + signature(expires), {
-        httpOnly: true, secure: !loopbackHttp && request.headers.origin !== lanOrigin, sameSite: 'strict', maxAge: sessionSeconds * 1000, path: '/',
+        httpOnly: true, secure: !(allowHttp && httpOrigin && request.headers.origin === configuredOrigin), sameSite: 'strict', maxAge: sessionSeconds * 1000, path: '/',
       });
       response.redirect(303, '/');
     });

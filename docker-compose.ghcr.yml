@@ -10,8 +10,8 @@ services:
       DEVICES_READ_ONLY: 'true'
       DEVICES_FILE: /app/config/devices.yaml
     ports:
-      # To expose to a LAN, set DASHBOARD_BIND_IP to the server LAN IP and restrict access at the firewall.
-      - "${DASHBOARD_BIND_IP:-127.0.0.1}:${PORT:-3000}:3000"
+      # To expose to a LAN, set BIND_IP to the server LAN IP and restrict access at the firewall.
+      - "${BIND_IP:-127.0.0.1}:${PUBLISH_PORT:-3000}:3000"
     volumes:
       - type: bind
         source: ./config/devices.yaml
