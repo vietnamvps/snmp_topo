@@ -1,0 +1,14 @@
+.env
+.venv/
+__pycache__/
+.codex/
+node_modules/
+dist/
+
+.env.*
+!.env.example
+/config/devices.yaml
+*.tmp
+*.log
+logs/
+.antigravity/

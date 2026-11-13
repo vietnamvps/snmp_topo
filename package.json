@@ -1,0 +1,27 @@
+{
+  "name": "opnsense-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "^22.12.0 || >=24.0.0" },
+  "workspaces": ["frontend"],
+  "scripts": {
+    "build": "tsc -p backend/tsconfig.json && npm run build --workspace frontend",
+    "prestart": "npm run build",
+    "start": "node --env-file-if-exists=.env backend/dist/main.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "net-snmp": "^3.26.0",
+    "ws": "^8.18.0",
+    "yaml": "^2.8.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/net-snmp": "^3.23.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.0",
+    "typescript": "~5.8.3"
+  }
+}

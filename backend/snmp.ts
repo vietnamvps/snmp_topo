@@ -1,0 +1,125 @@
+import snmp from 'net-snmp';
+import type { Device } from './configuration.js';
+
+const OIDS = {
+  name: '1.3.6.1.2.1.2.2.1.2',
+  status: '1.3.6.1.2.1.2.2.1.8',
+  rx: '1.3.6.1.2.1.31.1.1.1.6',
+  tx: '1.3.6.1.2.1.31.1.1.1.10',
+  discontinuity: '1.3.6.1.2.1.31.1.1.1.19',
+  cpu: '1.3.6.1.2.1.25.3.3.1.2',
+  storageType: '1.3.6.1.2.1.25.2.3.1.2',
+  storageSize: '1.3.6.1.2.1.25.2.3.1.5',
+  storageUsed: '1.3.6.1.2.1.25.2.3.1.6',
+  lldp: '1.0.8802.1.1.2.1.4.1.1.9',
+};
+
+type TableName = keyof typeof OIDS;
+type Table = Map<string, number | bigint | string>;
+export type Sample = {
+  timestamp: number;
+  tables: Partial<Record<TableName, Table>>;
+  uptime?: number;
+};
+
+function createSession(device: Device) {
+  const options = { port: device.port, timeout: 800, retries: 0,
+    transport: device.ip.includes(':') ? 'udp6' as const : 'udp4' as const };
+  if (device.snmp === 'v2c') {
+    const community = process.env[device.community_env];
+    if (!community) throw new Error('Missing SNMPv2c community');
+    return snmp.createSession(device.ip, community, { ...options, version: snmp.Version2c });
+  }
+
+  const authKey = process.env[device.auth_env];
+  const privKey = process.env[device.privacy_env];
+  if (!device.username || !authKey || !privKey || authKey.length < 8 || privKey.length < 8) {
+    throw new Error('SNMPv3 authPriv requires username and both passphrases');
+  }
+
+  return snmp.createV3Session(device.ip, {
+    name: device.username,
+    level: snmp.SecurityLevel.authPriv,
+    authProtocol: snmp.AuthProtocols[device.auth_protocol],
+    privProtocol: snmp.PrivProtocols.aes,
+    authKey,
+    privKey,
+  }, options);
+}
+
+function getUptime(session: snmp.Session): Promise<number | undefined> {
+  return new Promise((resolve, reject) => {
+    session.get(['1.3.6.1.2.1.1.3.0'], (error, bindings) => {
+      if (error) return reject(error);
+      const binding = bindings?.[0];
+      resolve(binding && !snmp.isVarbindError(binding) && typeof binding.value === 'number'
+        ? binding.value : undefined);
+    });
+  });
+}
+
+function walk(session: snmp.Session, oid: string): Promise<Table> {
+  return new Promise((resolve, reject) => {
+    const rows: Table = new Map();
+    session.subtree(oid, 20, bindings => {
+      for (const binding of bindings) {
+        if (snmp.isVarbindError(binding)) continue;
+        const index = binding.oid.slice(oid.length + 1);
+        const value = binding.value;
+        if (Buffer.isBuffer(value)) {
+          if (binding.type === snmp.ObjectType.Counter64) {
+            let counter = 0n;
+            for (const byte of value) counter = (counter << 8n) | BigInt(byte);
+            rows.set(index, counter);
+          } else {
+            rows.set(index, value.toString('utf8'));
+          }
+        } else if (typeof value === 'number' || typeof value === 'string') {
+          rows.set(index, value);
+        }
+      }
+    }, error => error ? reject(error) : resolve(rows));
+  });
+}
+
+export async function pollSnmp(device: Device, metadata: boolean): Promise<Sample> {
+  const session = createSession(device);
+  // Socket failures also surface through request callbacks or their timeout.
+  session.on('error', () => {});
+  try {
+    const uptime = await getUptime(session);
+    const names: TableName[] = ['status', 'rx', 'tx', 'discontinuity'];
+    if (metadata) names.push('name', 'lldp');
+    if (device.kind === 'firewall') names.push('cpu', 'storageType', 'storageSize', 'storageUsed');
+    const results = await Promise.allSettled(names.map(name => walk(session, OIDS[name])));
+    const tables: Sample['tables'] = {};
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') tables[names[index]] = result.value;
+    });
+    return { timestamp: performance.now(), tables, uptime };
+  } finally {
+    session.close();
+  }
+}
+
+export function counterRate(current: Sample, previous: Sample | undefined, direction: 'rx' | 'tx', index: string) {
+  if (!previous || current.timestamp <= previous.timestamp) return null;
+  if (current.uptime !== undefined && previous.uptime !== undefined && current.uptime < previous.uptime) return null;
+  if (current.tables.discontinuity?.get(index) !== previous.tables.discontinuity?.get(index)) return null;
+  const newest = current.tables[direction]?.get(index);
+  const oldest = previous.tables[direction]?.get(index);
+  if (typeof newest !== 'bigint' || typeof oldest !== 'bigint') return null;
+  return Number(BigInt.asUintN(64, newest - oldest)) * 8000 / (current.timestamp - previous.timestamp);
+}
+
+export function hostMetrics({ tables }: Sample) {
+  const loads = [...(tables.cpu?.values() ?? [])].filter(value => typeof value === 'number');
+  const ram = [...(tables.storageType ?? [])].find(([, value]) => value === '1.3.6.1.2.1.25.2.1.2');
+  const size = ram && tables.storageSize?.get(ram[0]);
+  const used = ram && tables.storageUsed?.get(ram[0]);
+  return {
+    cpu_percent: loads.length ? Math.round(10 * loads.reduce((sum, value) => sum + value, 0) / loads.length) / 10 : null,
+    ram_percent: typeof size === 'number' && size > 0 && typeof used === 'number'
+      ? Math.round(1000 * used / size) / 10 : null,
+  };
+}

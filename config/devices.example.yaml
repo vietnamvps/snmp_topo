@@ -1,0 +1,54 @@
+devices:
+  - {id: wan, name: Example ISP, ip: 203.0.113.14, kind: wan}
+  - id: firewall
+    name: OPNsense
+    ip: 192.0.2.1
+    kind: firewall
+    parent_id: wan
+    snmp: v2c
+    ports: 6
+    wan_interface: 1
+    interface_map: {core: 2}
+  - id: core
+    name: SW-CORE
+    ip: 192.0.2.2
+    kind: core
+    parent_id: firewall
+    snmp: v2c
+    ports: 24
+    interface_map: {server: 2, home: 3, nas: 4, frigate: 5, cisco: 6, sw1: 7, sw2: 8}
+  - {id: server, name: Proxmox, ip: 192.0.2.10, kind: server, parent_id: core}
+  - {id: home, name: Home Assistant, ip: 192.0.2.11, kind: home, parent_id: core}
+  - {id: nas, name: Synology NAS, ip: 192.0.2.12, kind: nas, parent_id: core}
+  - {id: frigate, name: Frigate NVR, ip: 192.0.2.13, kind: server, parent_id: core}
+  - id: cisco
+    name: "CISCO_SW#3"
+    ip: 192.0.2.250
+    kind: switch
+    parent_id: core
+    snmp: v2c
+    ports: 24
+    interface_map: {cloud: 2, office: 3}
+  - id: sw1
+    name: Switch1-251
+    ip: 192.0.2.251
+    kind: switch
+    parent_id: core
+    snmp: v2c
+    ports: 16
+    interface_map: {lobby: 2, cam1: 3, cam2: 4}
+  - id: sw2
+    name: Switch2-252
+    ip: 192.0.2.252
+    kind: switch
+    parent_id: core
+    snmp: v2c
+    ports: 12
+    interface_map: {warehouse: 2, cam3: 3}
+  - {id: cloud, name: UniFi Cloud Key, ip: 192.0.2.20, kind: server, parent_id: cisco}
+  - {id: office, name: AP_Office, ip: 192.0.2.21, kind: ap, parent_id: cisco}
+  - {id: lobby, name: AP_Lobby, ip: 192.0.2.22, kind: ap, parent_id: sw1}
+  - {id: warehouse, name: AP_Warehouse, ip: 192.0.2.23, kind: ap, parent_id: sw2}
+  - {id: cam1, name: Camera Entrance, ip: 192.0.2.31, kind: camera, parent_id: sw1}
+  - {id: cam2, name: Camera Parking, ip: 192.0.2.32, kind: camera, parent_id: sw1}
+  - {id: cam3, name: Camera Warehouse, ip: 192.0.2.33, kind: camera, parent_id: sw2}

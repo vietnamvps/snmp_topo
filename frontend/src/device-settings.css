@@ -1,0 +1,84 @@
+.config-button, .config-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 13px;
+  border: 1px solid #334660;
+  border-radius: 8px;
+  color: #dbeafe;
+  background: #182337;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.config-button:hover:not(:disabled), .config-back:hover { background: #213551; }
+.config-button:disabled { cursor: default; opacity: .5; }
+.device-settings { max-width: 1160px; margin: auto; padding: 28px 24px; }
+.config-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 22px 0; }
+.config-heading h1 { font-size: clamp(24px, 4vw, 34px); font-weight: 700; }
+.config-heading p, .config-hint { color: var(--muted); margin-top: 6px; }
+.config-layout { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.config-list, .config-form { background: #111a29; border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+.config-list { max-height: 75dvh; overflow: auto; }
+.config-list h2, .config-form h2 { display: flex; gap: 8px; align-items: center; font-weight: 650; }
+.config-list h2 span { color: var(--muted); font-size: 13px; }
+.config-item { display: block; width: 100%; padding: 9px 11px; margin-top: 8px; text-align: left; border: 1px solid transparent; border-radius: 7px; }
+.config-item:hover, .config-item[aria-current="true"] { background: #1b2c43; border-color: #385a7e; }
+.config-item strong, .config-item small { display: block; overflow-wrap: anywhere; }
+.config-form fieldset { min-width: 0; }
+.config-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 12px 0 24px; }
+.config-fields label { display: grid; align-content: start; gap: 5px; color: #cad8e9; font-size: 14px; }
+.config-fields input, .config-fields select {
+  min-width: 0;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #35465f;
+  border-radius: 7px;
+  background: #0d1524;
+  color: #e6eefc;
+}
+.config-fields input:disabled { opacity: .5; }
+.config-hint { font-size: 13px; }
+.config-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 18px; }
+.config-delete { color: #fecaca; }
+.config-save { background: #104763; border-color: #267c9f; }
+.config-error, .config-success { margin-top: 14px; }
+.config-error { color: #fca5a5; }
+.config-success { color: #6ee7b7; }
+@media (max-width: 700px) {
+  .device-settings { padding: 16px; }
+  .config-heading { align-items: flex-start; flex-wrap: wrap; }
+  .config-layout, .config-fields { grid-template-columns: minmax(0, 1fr); }
+  .config-list { max-height: 250px; }
+}
+
+.node-dialog {
+  width: min(680px, calc(100vw - 28px));
+  max-height: min(88dvh, 820px);
+  margin: auto;
+  overflow: auto;
+  border: 1px solid #334660;
+  border-radius: 14px;
+  background: #111a29;
+  color: #e6eefc;
+  box-shadow: 0 18px 72px #0009;
+}
+.node-dialog::backdrop { background: #050910b8; }
+.node-dialog-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.node-dialog-heading h2 { font-size: 19px; font-weight: 700; overflow-wrap: anywhere; }
+.node-dialog-actions, .config-delete-panel { padding: 18px 20px; }
+.node-dialog-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.config-delete-panel .config-button { margin-top: 15px; }
+.node-settings { padding: 0; }
+.node-settings .config-layout { display: block; }
+.node-settings .config-form { border: 0; }
+.node-settings .config-actions { justify-content: flex-end; }
+.device-card { cursor: pointer; }
+.device-card:focus-visible { outline: 2px solid #38bdf8; outline-offset: 3px; }
