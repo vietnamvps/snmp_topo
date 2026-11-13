@@ -6,7 +6,7 @@ import type { Kind } from './data';
 import './device-settings.css';
 
 type SecretField = 'community' | 'auth_key' | 'priv_key';
-type SecretDraft = Partial<Record<SecretField, string | null>>;
+type SecretDraft = Partial<Record<SecretField, string>>;
 
 type Device = {
   has_community?: boolean;
@@ -84,8 +84,8 @@ function newDevice(parent_id: string | null): Device {
   };
 }
 
-function SecretInput({ field, configured, value, onChange }: {
-  field: SecretField; configured?: boolean; value?: string | null; onChange: (value: string | null | undefined) => void;
+function SecretInput({ field, configured, value, onChange, onClear }: {
+  field: SecretField; configured?: boolean; value?: string; onChange: (value: string | undefined) => void; onClear: () => void;
 }) {
   const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
@@ -93,18 +93,14 @@ function SecretInput({ field, configured, value, onChange }: {
   return <div>
     <label>{t(field === 'community' ? 'communitySecret' : field === 'auth_key' ? 'authSecret' : 'privSecret')}
       <input type="password" autoComplete="new-password" minLength={minLength} maxLength={256}
-        value={value ?? ''} disabled={configured && !editing && value !== null}
+        value={value ?? ''} disabled={configured && !editing}
         onChange={event => onChange(event.target.value || undefined)} />
     </label>
-    {configured && <small>{t(value === null ? 'secretRemovePending' : 'secretConfigured')}</small>}
-    {configured && value !== null && <div className="config-actions">
+    {configured && <small>{t('secretConfigured')}</small>}
+    {configured && <div className="config-actions">
       <button type="button" className="config-button" onClick={() => setEditing(true)}>{t('secretReplace')}</button>
-      <button type="button" className="config-button" onClick={() => onChange(null)}>{t('delete')}</button>
+      <button type="button" className="config-button" onClick={onClear}>{t('secretClear')}</button>
     </div>}
-    {value === null && <button type="button" className="config-button" onClick={() => {
-      onChange(undefined);
-      setEditing(false);
-    }}>{t('secretUndo')}</button>}
   </div>;
 }
 
@@ -128,7 +124,7 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
     !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
   function secretInput(field: SecretField) {
     return <SecretInput key={selected + ':' + field} field={field} configured={device?.[`has_${field}`]}
-      value={secretDraft[field]} onChange={value => {
+      value={secretDraft[field]} onClear={() => void clearSecret(field)} onChange={value => {
         setSecretDraft(previous => ({ ...previous, [field]: value }));
         setDirty(true);
       }} />;
@@ -209,6 +205,27 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
 
   const hasChildren = devices.some(item => item.parent_id === selected);
   const headers = { 'Content-Type': 'application/json', 'X-Device-Config': '1' };
+
+  async function clearSecret(field: SecretField) {
+    if (!device || busy) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const saved = await requestConfig({
+        method: 'PATCH', headers, body: JSON.stringify({ [field]: null }),
+      }, '/' + device.id);
+      const updated = saved.devices.find(item => item.id === device.id);
+      setDevices(current => current.map(item => item.id === device.id
+        ? { ...item, [`has_${field}`]: updated?.[`has_${field}`] } : item));
+      setSecretDraft(current => ({ ...current, [field]: undefined }));
+      setMessage('secretCleared');
+    } catch (cause) {
+      setError(cause instanceof Error ? translationError(cause.message, 'saveError') : 'saveError');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function removeDevice() {
     if (!device || busy || hasChildren || (!mode && !window.confirm(t('deleteConfirm')))) return;

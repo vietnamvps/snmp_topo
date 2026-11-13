@@ -106,12 +106,22 @@ test('SQLite device seed, audit, ICMP topology and admin-only CRUD', async () =>
     assert.equal(missingKey.resolveCredentials(device), undefined);
     const unconfigured = buildTopology(devices, new Map(), new Map(), false, null, new Map(), false, new Map(), new Set(['switch']));
     assert.equal(unconfigured.devices.find(item => item.id === 'switch').status, 'unconfigured');
-    assert.equal((await request('/switch', 'PATCH', { community: null })).status, 200);
+    const clearedCommunity = await request('/switch', 'PATCH', { community: null });
+    assert.equal(clearedCommunity.status, 200);
+    assert.equal((await clearedCommunity.json()).devices.find(item => item.id === 'switch').has_community, false);
     assert.equal(secrets.resolveCredentials(device).community, 'fallback-test');
     const extra = { id: 'test-v3', name: 'Test', ip: '192.0.2.3', kind: 'switch',
       snmp: 'v3', username: 'test', auth_key: community, priv_key: community };
     assert.equal((await request('', 'POST', extra)).status, 201);
     assert.equal(secrets.flags(extra.id).has_auth_key, true);
+    for (const [field, untouched] of [['auth_key', 'priv_key'], ['priv_key', 'auth_key']]) {
+      assert.equal((await request('/' + extra.id, 'PATCH', { [untouched]: community })).status, 200);
+      const cleared = await request('/' + extra.id, 'PATCH', { [field]: null });
+      assert.equal(cleared.status, 200);
+      const retained = (await cleared.json()).devices.find(item => item.id === extra.id);
+      assert.equal(retained[`has_${field}`], false);
+      assert.equal(retained[`has_${untouched}`], true);
+    }
     assert.equal((await request('/' + extra.id, 'DELETE')).status, 200);
     assert.equal(accounts.db.prepare('SELECT count(*) AS count FROM device_secrets WHERE device_id=?').get(extra.id).count, 0);
     process.env.DEVICES_READ_ONLY = 'true';
