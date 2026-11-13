@@ -22,3 +22,7 @@ Xem [thứ tự xử lý rule OPNsense](https://docs.opnsense.org/manual/firewal
 Báo riêng cho người quản trị triển khai. Kèm phiên bản, cách tái hiện và ảnh hưởng. Xóa token, community, khóa và địa chỉ mạng thật khỏi nội dung gửi.
 
 Dùng ALLOWED_ORIGINS để cho phép các origin cụ thể, phân tách bằng dấu phẩy. CORS API liên origin hỗ trợ Bearer token. Giới hạn toàn tiến trình là 1.200 yêu cầu API và 240 lần nâng cấp WebSocket mỗi phút. Payload WebSocket đầu vào tối đa 1 KiB.
+
+## Trusted LAN over HTTP
+
+For a private IPv4 LAN, set `DASHBOARD_LAN_ORIGIN` to the exact HTTP origin, including its published port, and leave `DASHBOARD_ORIGIN` empty. Token authentication remains required in live mode. HTTP sends the token, session cookie and telemetry without transport encryption. Restrict the published port to trusted clients. The browser may restrict secure-context features such as clipboard access over LAN HTTP.

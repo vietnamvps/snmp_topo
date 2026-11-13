@@ -13,7 +13,17 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
   if (!mock && !/^[A-Za-z0-9_-]{32,256}$/.test(token)) {
     throw new Error('Live mode requires a random DASHBOARD_TOKEN (32–256 URL-safe characters)');
   }
-  const configuredOrigin = process.env.DASHBOARD_ORIGIN;
+  const lanOrigin = process.env.DASHBOARD_LAN_ORIGIN;
+  if (lanOrigin) {
+    const url = new URL(lanOrigin);
+    if (url.origin !== lanOrigin || url.protocol !== 'http:' ||
+        !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)\d+\.\d+(?:\.\d+)?$/.test(url.hostname)) {
+      throw new Error('DASHBOARD_LAN_ORIGIN must be an HTTP origin with a private IPv4 address');
+    }
+  }
+  const httpsOrigin = process.env.DASHBOARD_ORIGIN;
+  if (httpsOrigin && lanOrigin) throw new Error('Configure only one dashboard origin');
+  const configuredOrigin = httpsOrigin || lanOrigin;
   const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean));
   if (configuredOrigin) allowedOrigins.add(configuredOrigin);
   for (const origin of allowedOrigins) {
@@ -23,8 +33,8 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
     }
   }
 
-  if (!mock && !['127.0.0.1', '::1', 'localhost'].includes(host) && !configuredOrigin?.startsWith('https:')) {
-    throw new Error('Live mode on a non-loopback bind requires an HTTPS DASHBOARD_ORIGIN');
+  if (!mock && !['127.0.0.1', '::1', 'localhost'].includes(host) && !lanOrigin && !configuredOrigin?.startsWith('https:')) {
+    throw new Error('Live mode on a non-loopback bind requires HTTPS DASHBOARD_ORIGIN or explicit DASHBOARD_LAN_ORIGIN');
   }
 
   const sessionKey = randomBytes(32);
@@ -95,7 +105,7 @@ export function configureSecurity(app: Express, mock: boolean, host: string) {
       const expires = String(Math.floor(now / 1000) + sessionSeconds);
       const loopbackHttp = !configuredOrigin && /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(request.headers.origin);
       response.cookie(cookieName, expires + '.' + signature(expires), {
-        httpOnly: true, secure: !loopbackHttp, sameSite: 'strict', maxAge: sessionSeconds * 1000, path: '/',
+        httpOnly: true, secure: !loopbackHttp && request.headers.origin !== lanOrigin, sameSite: 'strict', maxAge: sessionSeconds * 1000, path: '/',
       });
       response.redirect(303, '/');
     });
