@@ -3,7 +3,8 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY frontend/package.json ./frontend/
-RUN npm ci --include=dev
+# Build the SQLite native addon when a matching musl binary is unavailable.
+RUN apk add --no-cache python3 make g++ && npm ci --include=dev --foreground-scripts
 
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
