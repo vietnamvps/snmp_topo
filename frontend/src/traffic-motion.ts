@@ -9,6 +9,8 @@ const SMOOTH_SECONDS = 1.5;
 const HYSTERESIS = 0.2;
 const FADE_ZONE = 0.1;
 const UPLOAD_OFFSET = 3;
+const GEOMETRY_SAMPLE_SPACING = 4;
+const MAX_GEOMETRY_SEGMENTS = 512;
 export const PARTICLE_DIRECTION = 'parent-to-child';
 export const PARTICLE_MODE = 'dual' as 'single' | 'dual';
 
@@ -37,31 +39,43 @@ export function updateMotion(motion: ReturnType<typeof createMotion>, bps: numbe
 const wrap = (phase: number) => (phase % 1 + 1) % 1;
 
 export function advanceMotion(motion: ReturnType<typeof createMotion>, dt: number) {
-  motion.rate += (motion.target - motion.rate) * -Math.expm1(-dt / SMOOTH_SECONDS);
+  const blend = -Math.expm1(-dt / SMOOTH_SECONDS);
+  const distance = motion.target * dt + (motion.rate - motion.target) * SMOOTH_SECONDS * blend;
+  motion.rate += (motion.target - motion.rate) * blend;
   const opacity = motion.bps === null ? 0 : 1;
   motion.opacity += (opacity - motion.opacity) * -Math.expm1(-dt / 0.25);
-  motion.phase = wrap(motion.phase + motion.rate * dt);
+  motion.phase = wrap(motion.phase + distance);
 }
 
 export const particleSizes = Array.from({ length: PARTICLE_COUNT }, (_, index) =>
   RADIUS_MIN + (RADIUS_MAX - RADIUS_MIN) * index / (PARTICLE_COUNT - 1));
 
-export function positionParticles(path: SVGPathElement, particles: SVGGElement[], phase: number, upload: boolean, length: number) {
-  if (!length) return;
+export function sampleTrafficPath(path: SVGPathElement) {
+  const length = path.getTotalLength();
+  if (!length) return [];
+  const segments = Math.max(2, Math.min(MAX_GEOMETRY_SEGMENTS, Math.ceil(length / GEOMETRY_SAMPLE_SPACING)));
+  return Array.from({ length: segments + 1 }, (_, index) => path.getPointAtLength(index / segments * length));
+}
+
+export function positionParticles(points: ReturnType<typeof sampleTrafficPath>, particles: SVGGElement[], phase: number, upload: boolean) {
+  if (points.length < 2) return;
+  const forward = PARTICLE_DIRECTION === 'parent-to-child' && !upload;
+  const offset = upload ? UPLOAD_OFFSET : 0;
   particles.forEach((particle, index) => {
     const progress = wrap(phase + index / PARTICLE_COUNT);
-    const forward = PARTICLE_DIRECTION === 'parent-to-child' && !upload;
-    const distance = (forward ? progress : 1 - progress) * length;
-    const point = path.getPointAtLength(distance);
-    const tangent = path.getPointAtLength(distance < length - 1 ? distance + 1 : distance - 1);
-    const sign = distance < length - 1 ? 1 : -1;
-    const dx = (tangent.x - point.x) * sign;
-    const dy = (tangent.y - point.y) * sign;
+    const position = (forward ? progress : 1 - progress) * (points.length - 1);
+    const segment = Math.min(Math.floor(position), points.length - 2);
+    const fraction = position - segment;
+    const start = points[segment];
+    const end = points[segment + 1];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
     const norm = Math.hypot(dx, dy) || 1;
-    const offset = upload ? UPLOAD_OFFSET : 0;
+    const x = start.x + dx * fraction - dy / norm * offset;
+    const y = start.y + dy * fraction + dx / norm * offset;
     const angle = Math.atan2(dy, dx) * 180 / Math.PI + (forward ? 0 : 180);
     const fade = Math.min(1, progress / FADE_ZONE, (1 - progress) / FADE_ZONE);
-    particle.setAttribute('transform', `translate(${point.x - dy / norm * offset} ${point.y + dx / norm * offset}) rotate(${angle})`);
+    particle.setAttribute('transform', `translate(${x} ${y}) rotate(${angle})`);
     particle.setAttribute('opacity', String(fade * fade * (3 - 2 * fade)));
   });
 }

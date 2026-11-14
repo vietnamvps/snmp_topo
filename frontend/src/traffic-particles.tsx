@@ -1,10 +1,11 @@
 import { memo, useLayoutEffect, useRef } from 'react';
-import { advanceMotion, createMotion, particleSizes, positionParticles, subscribeTrafficFrames, updateMotion } from './traffic-motion';
+import { advanceMotion, createMotion, particleSizes, positionParticles, sampleTrafficPath, subscribeTrafficFrames, updateMotion } from './traffic-motion';
 
 export const TrafficParticles = memo(function TrafficParticles({ id, path, bps, upload = false }: {
   id: string; path: string; bps: number | null; upload?: boolean;
 }) {
   const geometry = useRef<SVGPathElement>(null);
+  const points = useRef<ReturnType<typeof sampleTrafficPath>>([]);
   const group = useRef<SVGGElement>(null);
   const motion = useRef<ReturnType<typeof createMotion>>();
   if (!motion.current) motion.current = createMotion(id, bps);
@@ -18,17 +19,24 @@ export const TrafficParticles = memo(function TrafficParticles({ id, path, bps, 
     }
   }, [bps]);
   useLayoutEffect(() => {
-    const curve = geometry.current!;
-    const length = curve.getTotalLength();
+
     const particles = Array.from(group.current!.children) as SVGGElement[];
     function draw(dt: number) {
       const state = motion.current!;
       advanceMotion(state, dt);
       group.current!.setAttribute('opacity', String(state.opacity));
-      if (state.opacity > 0.001) positionParticles(curve, particles, state.phase, upload, length);
+      if (state.opacity > 0.001) positionParticles(points.current, particles, state.phase, upload);
     }
-    draw(0);
+
     return subscribeTrafficFrames(draw);
+  }, [upload]);
+
+  useLayoutEffect(() => {
+    points.current = sampleTrafficPath(geometry.current!);
+    const state = motion.current!;
+    const element = group.current!;
+    element.setAttribute('opacity', String(state.opacity));
+    positionParticles(points.current, Array.from(element.children) as SVGGElement[], state.phase, upload);
   }, [path, upload]);
 
   return <>

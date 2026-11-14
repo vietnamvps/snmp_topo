@@ -33,6 +33,7 @@ test('five snapshots preserve particle DOM and phase, sharing one frame and hono
   const { window } = dom;
   const frames = new Map();
   let handle = 0;
+  let geometryReads = 0;
   const media = new window.EventTarget();
   media.matches = false;
   window.matchMedia = () => media;
@@ -63,7 +64,7 @@ test('five snapshots preserve particle DOM and phase, sharing one frame and hono
       const node = create(namespace, name, ...rest);
       if (name === 'path') {
         node.getTotalLength = () => 100;
-        node.getPointAtLength = x => ({ x, y: 0 });
+        node.getPointAtLength = x => { geometryReads++; return { x, y: 0 }; };
       }
       return node;
     };
@@ -81,6 +82,8 @@ test('five snapshots preserve particle DOM and phase, sharing one frame and hono
     }
 
     await render(5000);
+    const initialGeometryReads = geometryReads;
+    assert.ok(initialGeometryReads > 0);
     frame(1000);
     frame(1016);
     const initial = groups();
@@ -98,6 +101,7 @@ test('five snapshots preserve particle DOM and phase, sharing one frame and hono
     await render(5000, 10000);
     assert.equal(groups()[1], initial[1]);
     assert.notDeepEqual(positions(groups()), phase);
+    assert.equal(geometryReads, initialGeometryReads);
     Object.defineProperty(window.document, 'hidden', { value: true, configurable: true });
     window.document.dispatchEvent(new window.Event('visibilitychange'));
     assert.equal(frames.size, 0);
