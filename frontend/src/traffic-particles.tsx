@@ -19,12 +19,13 @@ export const TrafficParticles = memo(function TrafficParticles({ id, path, bps, 
     }
   }, [bps]);
   useLayoutEffect(() => {
-
-    const particles = Array.from(group.current!.children) as SVGGElement[];
+    const element = group.current!;
+    const particles = Array.from(element.children) as SVGGElement[];
     function draw(dt: number) {
       const state = motion.current!;
+      const opacity = state.opacity;
       advanceMotion(state, dt);
-      group.current!.setAttribute('opacity', String(state.opacity));
+      if (state.opacity !== opacity) element.setAttribute('opacity', String(state.opacity));
       if (state.opacity > 0.001) positionParticles(points.current, particles, state.phase, upload);
     }
 

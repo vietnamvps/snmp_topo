@@ -136,11 +136,11 @@ main { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .canvas .react-flow__edgelabel-renderer { z-index: 2; }
 .canvas .react-flow__nodes { z-index: 3; }
 
-.device-card, .traffic-line, .traffic-particles, .edge-label { transition: opacity 150ms ease; }
+.device-card, .traffic-line, .edge-label { transition: opacity 150ms ease; }
 .canvas .react-flow__edge, .canvas .react-flow__edge path,
 .canvas .react-flow__edgelabel-renderer, .canvas .edge-label { pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
-  .device-card, .traffic-line, .traffic-particles, .edge-label { transition: none; }
+  .device-card, .traffic-line, .edge-label { transition: none; }
 }
 .shift-snap-guide { position: absolute; inset: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .traffic-anchor { fill: #a5f3fc; filter: drop-shadow(0 0 2px #22d3ee); pointer-events: none; }

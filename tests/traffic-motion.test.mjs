@@ -94,6 +94,9 @@ test('five snapshots preserve particle DOM and phase, sharing one frame and hono
       assert.deepEqual(positions(groups()), phase);
     }
     assert.ok(initial[1].classList.contains('traffic-particles-upload'));
+    for (const transform of positions(groups()).flat()) {
+      assert.match(transform, /^translate\([\d.]+ 0\)/);
+    }
     await render(5000, null);
     assert.equal(groups()[1], initial[1]);
     frame(1032);
