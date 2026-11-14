@@ -1,3 +1,4 @@
+import { configureGatewayReader, type Gateway } from './opnsense.js';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
@@ -34,7 +35,17 @@ let speedtest: Speedtest | null = null;
 let previous = new Map<string, Sample>();
 const metadataCache = new Map<string, Pick<Sample['tables'], 'name' | 'lldp'>>();
 const history: TrafficHistory = new Map();
-let snapshot = buildTopology(devices, previous, previous, mock, speedtest);
+let gatewayState: { status: 'waiting' | 'ok' | 'unavailable'; items: Gateway[] } | null = null;
+let gatewayTimer: NodeJS.Timeout | undefined;
+let gatewayReader: ReturnType<typeof configureGatewayReader>;
+try {
+  gatewayReader = mock ? undefined : configureGatewayReader();
+  if (gatewayReader) gatewayState = { status: 'waiting', items: [] };
+} catch {
+  gatewayState = { status: 'unavailable', items: [] };
+  console.warn('Invalid OPNsense API configuration. Check HTTPS origin, credentials and CA file.');
+}
+let snapshot = { ...buildTopology(devices, previous, previous, mock, speedtest), opnsense: gatewayState };
 let cycle = 0;
 let stopped = false;
 let activePoll: Promise<void> | undefined;
@@ -208,7 +219,7 @@ async function runPoller() {
 }
 
 function publish(samples: Map<string, Sample>, record = true, reachable = new Map<string, boolean>(), unconfigured = new Set<string>()) {
-  snapshot = buildTopology(devices, samples, previous, mock, speedtest, history, record, reachable, unconfigured);
+  snapshot = { ...buildTopology(devices, samples, previous, mock, speedtest, history, record, reachable, unconfigured), opnsense: gatewayState };
   previous = samples;
   const payload = JSON.stringify(snapshot);
   for (const client of streams.clients) {
@@ -232,7 +243,17 @@ async function updateSpeedtest(url: string, intervalMs: number) {
   if (!stopped) speedtestTimer = setTimeout(updateSpeedtest, intervalMs, url, intervalMs);
 }
 
+async function updateGateways(reader: NonNullable<typeof gatewayReader>) {
+  try {
+    gatewayState = { status: 'ok', items: await reader(shutdown.signal) };
+  } catch {
+    gatewayState = { status: 'unavailable', items: [] };
+  }
+  if (!stopped) gatewayTimer = setTimeout(updateGateways, 10_000, reader);
+}
+
 function stop() {
+  clearTimeout(gatewayTimer);
   stopped = true;
   clearTimeout(pollTimer);
   clearTimeout(speedtestTimer);
@@ -250,5 +271,6 @@ process.once('SIGTERM', stop);
 server.listen(port, host, () => {
   console.log(`Dashboard listening on ${host}:${port} (mock: ${mock})`);
   void requestPoll();
+  if (gatewayReader) void updateGateways(gatewayReader);
   if (speedtestUrl) void updateSpeedtest(speedtestUrl, speedtestInterval);
 });

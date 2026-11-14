@@ -1,4 +1,6 @@
 {
+  "opnsenseWaiting": "Đang chờ dữ liệu gateway",
+  "opnsenseUnavailable": "Không lấy được dữ liệu OPNsense API",
   "drawer": "Cấu hình và cảnh báo",
   "settings": "Cấu hình thiết bị",
   "alerts": "Cảnh báo",

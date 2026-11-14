@@ -16,6 +16,9 @@ export type Device = {
 };
 
 export type Snapshot = {
+  opnsense?: { status: 'waiting' | 'ok' | 'unavailable'; items: {
+    name: string; status: string; latency_ms: number | null; loss_percent: number | null;
+  }[] } | null;
   updated_at: string;
   mock: boolean;
   devices: Device[];

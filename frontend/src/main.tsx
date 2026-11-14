@@ -59,6 +59,16 @@ function SystemBar({ snapshot, connected }: { snapshot?: Snapshot; connected: bo
       aria-label={t('drawer')} title={t('drawer')} onClick={() => setDrawerOpen(!drawerOpen)}><Settings size={18} /></button>
     {drawerOpen && <aside className="command-drawer" id="noc-drawer" aria-label={t('drawer')}>
       <a className="config-button" href="/devices">{t('settings')}</a>
+      {snapshot?.opnsense && <section>
+        <h2>OPNsense WAN</h2>
+        {snapshot.opnsense.status === 'ok' ? <ul>{snapshot.opnsense.items.map((gateway, index) =>
+          <li key={gateway.name + ':' + index}><strong>{gateway.name}</strong>
+            <span>{gateway.status === 'online' ? t('up') : gateway.status === 'offline' ? t('down')
+              : gateway.status === 'warning' ? t('warning') : t('unknown')}
+              {' · '}{gateway.latency_ms == null ? '—' : gateway.latency_ms + ' ms'}
+              {' · '}{gateway.loss_percent == null ? '—' : gateway.loss_percent + '%'}</span></li>)}</ul>
+          : <p>{snapshot.opnsense.status === 'waiting' ? t('opnsenseWaiting') : t('opnsenseUnavailable')}</p>}
+      </section>}
       <h2>{t('alerts')}</h2>
       {alerts.length ? <ul>{alerts.map(device => <li key={device.id}>{deviceName(device, snapshot?.mock)}
         <span>{device.status === 'offline' ? t('offline') : t('warning')}</span></li>)}</ul> : <p>{t('noAlerts')}</p>}

@@ -1,4 +1,6 @@
 {
+  "opnsenseWaiting": "Waiting for gateway telemetry",
+  "opnsenseUnavailable": "OPNsense API unavailable",
   "drawer": "Settings and alerts",
   "settings": "Device settings",
   "alerts": "Alerts",

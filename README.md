@@ -124,3 +124,11 @@ Enter credentials in **Edit device**. Leave a password field blank to keep its c
 Back up the SQLite database at `DATABASE_FILE` (default `data/app.db`) with the app stopped or via a SQLite-aware backup. Back up `data/.master.key` separately in a restricted location. If using `SECRETS_MASTER_KEY`, back up that exact 32-byte base64 key separately instead. Restore the matching database and key together.
 
 Run `npm run secrets:check` to list devices with missing or unreadable SNMP credentials. To rotate, stop the app, back up the database and key, and run `npm run secrets:rotate` with the existing key available. Rotation switches to the new `data/.master.key`. Remove `SECRETS_MASTER_KEY` from the runtime environment and .env before restarting. For Compose, stop the service, then run `docker compose run --rm --no-deps opnsense-monitor npm run secrets:rotate`. Keep the data mount writable. Preserve any .master.key.next file after an interrupted rotation until startup has reconciled it with the database fingerprint.
+
+## Optional OPNsense gateway monitoring
+
+Create a dedicated OPNsense user and API key under **System → Access → Users**. In Effective Privileges, grant access to `GET /api/routes/gateway/status` and avoid administrative privileges. Enable gateway monitoring in OPNsense for latency and packet loss readings.
+
+Set `OPNSENSE_API_URL` to the HTTPS origin of the firewall and set `OPNSENSE_API_KEY` and `OPNSENSE_API_SECRET` in the dashboard server .env. The URL hostname must match the certificate. For a private CA, set `OPNSENSE_API_CA_FILE` to the CA PEM path inside the runtime. With Compose, mount the PEM read-only under /app/config and use its container path. Recreate the service to load .env changes.
+
+In live mode, open the dashboard gear menu to see **OPNsense WAN**. It reports gateway status, latency in milliseconds, and packet loss in percent. The dashboard queries OPNsense every 10 seconds. Missing gateway measurements appear as unknown. SNMP continues to supply topology and traffic.
