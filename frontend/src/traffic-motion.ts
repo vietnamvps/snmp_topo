@@ -10,7 +10,7 @@ const HYSTERESIS = 0.2;
 const FADE_ZONE = 0.1;
 const UPLOAD_OFFSET = 3;
 export const PARTICLE_DIRECTION = 'parent-to-child';
-export const PARTICLE_MODE = 'single' as 'single' | 'dual';
+export const PARTICLE_MODE = 'dual' as 'single' | 'dual';
 
 export function trafficBps(status: string, down: number | null, up: number | null) {
   const total = (down ?? 0) + (up ?? 0);
@@ -22,22 +22,24 @@ function speed(bps: number) {
   return 1 / (MAX_DURATION_SECONDS - progress * (MAX_DURATION_SECONDS - MIN_DURATION_SECONDS));
 }
 
-export function createMotion(id: string, bps: number) {
+export function createMotion(id: string, bps: number | null) {
   let hash = 0;
   for (const char of id) hash = Math.imul(hash, 31) + char.charCodeAt(0) | 0;
-  return { phase: (hash >>> 0) % 1009 / 1009, rate: speed(bps), target: speed(bps), bps };
+  return { phase: (hash >>> 0) % 1009 / 1009, rate: speed(bps ?? LOW_TRAFFIC_BPS), target: speed(bps ?? LOW_TRAFFIC_BPS), bps, opacity: bps === null ? 0 : 1 };
 }
 
-export function updateMotion(motion: ReturnType<typeof createMotion>, bps: number) {
-  if (Math.abs(bps - motion.bps) <= motion.bps * HYSTERESIS) return;
+export function updateMotion(motion: ReturnType<typeof createMotion>, bps: number | null) {
+  if (bps !== null && motion.bps !== null && Math.abs(bps - motion.bps) <= motion.bps * HYSTERESIS) return;
   motion.bps = bps;
-  motion.target = speed(bps);
+  if (bps !== null) motion.target = speed(bps);
 }
 
 const wrap = (phase: number) => (phase % 1 + 1) % 1;
 
 export function advanceMotion(motion: ReturnType<typeof createMotion>, dt: number) {
   motion.rate += (motion.target - motion.rate) * -Math.expm1(-dt / SMOOTH_SECONDS);
+  const opacity = motion.bps === null ? 0 : 1;
+  motion.opacity += (opacity - motion.opacity) * -Math.expm1(-dt / 0.25);
   motion.phase = wrap(motion.phase + motion.rate * dt);
 }
 

@@ -2,14 +2,21 @@ import { memo, useLayoutEffect, useRef } from 'react';
 import { advanceMotion, createMotion, particleSizes, positionParticles, subscribeTrafficFrames, updateMotion } from './traffic-motion';
 
 export const TrafficParticles = memo(function TrafficParticles({ id, path, bps, upload = false }: {
-  id: string; path: string; bps: number; upload?: boolean;
+  id: string; path: string; bps: number | null; upload?: boolean;
 }) {
   const geometry = useRef<SVGPathElement>(null);
   const group = useRef<SVGGElement>(null);
   const motion = useRef<ReturnType<typeof createMotion>>();
   if (!motion.current) motion.current = createMotion(id, bps);
 
-  useLayoutEffect(() => { updateMotion(motion.current!, bps); }, [bps]);
+  useLayoutEffect(() => {
+    const state = motion.current!;
+    updateMotion(state, bps);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      state.opacity = bps === null ? 0 : 1;
+      group.current!.setAttribute('opacity', String(state.opacity));
+    }
+  }, [bps]);
   useLayoutEffect(() => {
     const curve = geometry.current!;
     const length = curve.getTotalLength();
@@ -17,7 +24,8 @@ export const TrafficParticles = memo(function TrafficParticles({ id, path, bps, 
     function draw(dt: number) {
       const state = motion.current!;
       advanceMotion(state, dt);
-      positionParticles(curve, particles, state.phase, upload, length);
+      group.current!.setAttribute('opacity', String(state.opacity));
+      if (state.opacity > 0.001) positionParticles(curve, particles, state.phase, upload, length);
     }
     draw(0);
     return subscribeTrafficFrames(draw);

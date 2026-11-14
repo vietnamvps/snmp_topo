@@ -163,7 +163,8 @@ export const TrafficEdge = memo(function TrafficEdge({ id, source, target, marke
     curvature: 0.22,
   });
   const dual = PARTICLE_MODE === 'dual';
-  const bps = trafficBps(device.status, device.down_bps, device.up_bps);
+  const live = device.status === 'online' || device.status === 'warning';
+  const bps = trafficBps(device.status, device.down_bps, dual ? null : device.up_bps);
   const upload = dual ? trafficBps(device.status, null, device.up_bps) : null;
   return (
     <>
@@ -171,8 +172,8 @@ export const TrafficEdge = memo(function TrafficEdge({ id, source, target, marke
       <circle cx={anchors.sourceX} cy={anchors.sourceY} r={3} className={`traffic-anchor${dimmed}`} />
       <circle cx={anchors.targetX} cy={anchors.targetY} r={3} className={`traffic-anchor${dimmed}`} />
       <g className={dimmed ? 'topology-muted' : undefined}>
-        {bps !== null && <TrafficParticles id={id} path={path} bps={bps} />}
-        {upload !== null && <TrafficParticles id={id + ':upload'} path={path} bps={upload} upload />}
+        {live && <TrafficParticles id={id} path={path} bps={bps} />}
+        {live && dual && <TrafficParticles id={id + ':upload'} path={path} bps={upload} upload />}
       </g>
       {labels && (!dragged || source === dragged || target === dragged) && <EdgeLabelRenderer>
         <div className={`edge-label${dimmed}`} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>

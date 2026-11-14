@@ -68,9 +68,9 @@ test('five snapshots preserve particle DOM and phase, sharing one frame and hono
       return node;
     };
     root = createRoot(window.document.getElementById('root'));
-    const render = async bps => act(() => root.render(React.createElement('svg', null,
+    const render = async (bps, uploadBps = bps) => act(() => root.render(React.createElement('svg', null,
       React.createElement(TrafficParticles, { id: 'parent:child', path: 'M0 0 L100 0', bps }),
-      React.createElement(TrafficParticles, { id: 'parent:other', path: 'M0 0 L100 0', bps }))));
+      React.createElement(TrafficParticles, { id: 'parent:child:upload', path: 'M0 0 L100 0', bps: uploadBps, upload: true }))));
     const groups = () => [...window.document.querySelectorAll('.traffic-particles')];
     const positions = nodes => nodes.map(group => [...group.children].map(node => node.getAttribute('transform')));
     function frame(now) {
@@ -90,7 +90,13 @@ test('five snapshots preserve particle DOM and phase, sharing one frame and hono
       groups().forEach((group, index) => assert.equal(group, initial[index]));
       assert.deepEqual(positions(groups()), phase);
     }
+    assert.ok(initial[1].classList.contains('traffic-particles-upload'));
+    await render(5000, null);
+    assert.equal(groups()[1], initial[1]);
     frame(1032);
+    assert.ok(Number(initial[1].getAttribute('opacity')) < 1);
+    await render(5000, 10000);
+    assert.equal(groups()[1], initial[1]);
     assert.notDeepEqual(positions(groups()), phase);
     Object.defineProperty(window.document, 'hidden', { value: true, configurable: true });
     window.document.dispatchEvent(new window.Event('visibilitychange'));
