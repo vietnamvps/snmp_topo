@@ -132,7 +132,7 @@ function Dashboard() {
   const [layoutMessage, setLayoutMessage] = useState('');
   const importFile = useRef<HTMLInputElement>(null);
   const fitRequested = useRef(false);
-  const [labels, setLabels] = useState(true);
+  const [labels, setLabels] = useState(false);
   const [action, setAction] = useState<DialogAction>();
   const [menu, setMenu] = useState<MenuAnchor>();
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);

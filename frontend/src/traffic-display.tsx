@@ -1,69 +1,47 @@
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { rate } from './data';
-import { subscribeTrafficFrames } from './traffic-motion';
 
-const TRANSITION_SECONDS = 0.65;
 const HISTORY_POINTS = 15;
-
-function useAnimatedTraffic<T>(target: T, interpolate: (from: T, to: T, progress: number) => T, paint: (value: T) => void) {
-  const current = useRef(target);
-  useLayoutEffect(() => {
-    const from = current.current;
-    let elapsed = 0;
-    if (Object.is(from, target) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      current.current = target;
-      paint(target);
-      return;
-    }
-
-    const unsubscribe = subscribeTrafficFrames(dt => {
-      elapsed = Math.min(TRANSITION_SECONDS, elapsed + dt);
-      const progress = elapsed / TRANSITION_SECONDS;
-      current.current = interpolate(from, target, 1 - (1 - progress) ** 3);
-      paint(current.current);
-      if (progress === 1) unsubscribe();
-    });
-    return unsubscribe;
-  }, [target, interpolate, paint]);
-}
-
-function interpolateSample(from: number | null, to: number | null, progress: number) {
-  if (from == null || to == null || progress === 1) return to;
-  return from + (to - from) * progress;
-}
+const SAMPLE_SPACING = 5;
+const SCROLL_MS = 220;
+const MIN_SCALE_BPS = 8_000;
 
 export function TrafficRate({ bps }: { bps?: number | null }) {
-  const element = useRef<HTMLSpanElement>(null);
-  const paint = useRef((value: number | null) => {
-    const next = rate(value);
-    if (element.current && element.current.textContent !== next) element.current.textContent = next;
-  });
-  useAnimatedTraffic(bps ?? null, interpolateSample, paint.current);
-  return <span ref={element} />;
-}
-
-function interpolateHistory(from: (number | null)[], to: (number | null)[], progress: number) {
-  if (progress === 1) return to;
-  const offset = from.length - to.length;
-  return to.map((value, index) => interpolateSample(from[index + offset] ?? null, value, progress));
+  return <span>{rate(bps)}</span>;
 }
 
 export function TrafficHistoryPath({ history }: { history: (number | null)[] }) {
   const element = useRef<SVGPathElement>(null);
-  const paint = useRef((values: (number | null)[]) => {
-    const scale = Math.max(1, ...values.map(value => value ?? 0));
-    let penDown = false;
-    const path = values.map((value, index) => {
-      if (value == null) {
-        penDown = false;
-        return '';
-      }
-      const command = penDown ? 'L' : 'M';
-      penDown = true;
-      return command + ((HISTORY_POINTS - values.length + index) * 5 + 2) + ' ' + (23 - 20 * value / scale);
-    }).join(' ');
-    element.current?.setAttribute('d', path);
-  });
-  useAnimatedTraffic(history, interpolateHistory, paint.current);
-  return <path ref={element} className="spark-line" />;
+  const previous = useRef<(number | null)[]>();
+  const peak = Math.max(MIN_SCALE_BPS, ...history.map(value => value ?? 0));
+  const requiredScale = 2 ** Math.ceil(Math.log2(peak));
+  const [scale, setScale] = useState(requiredScale);
+  const nextScale = peak > scale || requiredScale <= scale / 4 ? requiredScale : scale;
+  if (nextScale !== scale) setScale(nextScale);
+
+  useLayoutEffect(() => {
+    const before = previous.current;
+    previous.current = history;
+    const overlap = before && Math.min(before.length, history.length - 1);
+    const advanced = overlap && before.slice(-overlap).every((value, index) => value === history[index]);
+    const identical = before?.length === history.length && before.every((value, index) => value === history[index]);
+    if (!advanced || identical || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const animation = element.current?.animate(
+      [{ transform: 'translateX(' + SAMPLE_SPACING + 'px)' }, { transform: 'translateX(0)' }],
+      { duration: SCROLL_MS, easing: 'ease-out' },
+    );
+    return () => animation?.cancel();
+  }, [history]);
+
+  let penDown = false;
+  const path = history.map((value, index) => {
+    if (value == null) {
+      penDown = false;
+      return '';
+    }
+    const command = penDown ? 'L' : 'M';
+    penDown = true;
+    return command + ((HISTORY_POINTS - history.length + index) * SAMPLE_SPACING + 2) + ' ' + (23 - 20 * value / nextScale);
+  }).join(' ');
+  return <path ref={element} d={path} className="spark-line" />;
 }
