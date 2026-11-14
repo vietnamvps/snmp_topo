@@ -96,10 +96,12 @@ function SecretInput({ field, configured, value, onChange, onClear }: {
         value={value ?? ''} disabled={configured && !editing}
         onChange={event => onChange(event.target.value || undefined)} />
     </label>
-    {configured && <small>{t('secretConfigured')}</small>}
-    {configured && <div className="config-actions">
-      <button type="button" className="config-button" onClick={() => setEditing(true)}>{t('secretReplace')}</button>
-      <button type="button" className="config-button" onClick={onClear}>{t('secretClear')}</button>
+    {(configured || field !== 'community') && <div className={configured ? undefined : 'config-key-controls-hidden'}>
+      <small>{t('secretConfigured')}</small>
+      <div className="config-actions">
+        <button type="button" className="config-button" onClick={() => setEditing(true)}>{t('secretReplace')}</button>
+        <button type="button" className="config-button" onClick={onClear}>{t('secretClear')}</button>
+      </div>
     </div>}
   </div>;
 }
@@ -389,16 +391,17 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
                 {device.monitor_mode === 'snmp' && device.snmp === 'v2c' && secretInput('community')}
                 {device.monitor_mode === 'snmp' && device.snmp === 'v3' && <>
                   <label className="config-field-wide">{t('username')}<input required value={device.username ?? ''} onChange={event => patch({ username: event.target.value })} /></label>
+                  {secretInput('auth_key')}
                   <label>{t('authAlgorithm')}<select value={device.auth_protocol ?? 'sha256'}
                     onChange={event => patch({ auth_protocol: event.target.value as 'sha' | 'sha256' | 'sha512' })}>
                     <option value="sha">SHA-1</option><option value="sha256">SHA-256</option><option value="sha512">SHA-512</option>
-                  </select><small>{t('snmpAlgorithmHint')}</small></label>
-                  {secretInput('auth_key')}
+                  </select></label>
+                  {secretInput('priv_key')}
                   <label>{t('privacyAlgorithm')}<select value={device.privacy_protocol ?? 'aes'}
                     onChange={event => patch({ privacy_protocol: event.target.value as Device['privacy_protocol'] })}>
                     <option value="aes">AES-128</option><option value="aes256b">AES-256 Blumenthal</option><option value="aes256r">AES-256 Reeder</option>
-                  </select><small>{t('snmpAlgorithmHint')}</small></label>
-                  {secretInput('priv_key')}
+                  </select></label>
+                  <p className="config-hint config-field-wide">{t('snmpAlgorithmHint')}</p>
                 </>}
               </div>
               {device.monitor_mode === 'snmp' && insecurePage && <p className="config-error" role="alert">{t('secretHttpWarning')}</p>}

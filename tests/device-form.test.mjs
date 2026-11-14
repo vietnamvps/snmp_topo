@@ -7,7 +7,7 @@ const form = readFileSync(new URL('../frontend/src/device-settings.tsx', import.
 test('SNMP form orders v3 fields, uses new-device defaults and omits untouched secrets', () => {
   const snmp = form.slice(form.indexOf('<h2>SNMP</h2>'), form.indexOf('</fieldset>'));
   const ordered = ["t('version')", "t('udpPort')", "t('username')",
-    "t('authAlgorithm')", "secretInput('auth_key')", "t('privacyAlgorithm')", "secretInput('priv_key')"];
+    "secretInput('auth_key')", "t('authAlgorithm')", "secretInput('priv_key')", "t('privacyAlgorithm')", "t('snmpAlgorithmHint')"];
   let previous = -1;
   for (const field of ordered) {
     const index = snmp.indexOf(field);
@@ -15,6 +15,7 @@ test('SNMP form orders v3 fields, uses new-device defaults and omits untouched s
     previous = index;
   }
   assert.match(snmp, /className="config-field-wide">\{t\('username'\)\}/);
+  assert.equal([...snmp.matchAll(/snmpAlgorithmHint/g)].length, 1);
   assert.doesNotMatch(snmp, /community_env|auth_env|privacy_env/);
   const draft = form.slice(form.indexOf('function newDevice'), form.indexOf('function SecretInput'));
   assert.match(draft, /auth_protocol: 'sha', privacy_protocol: 'aes'/);
