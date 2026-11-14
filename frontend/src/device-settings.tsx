@@ -22,6 +22,7 @@ type Device = {
   monitor_mode: 'snmp' | 'icmp' | 'none';
   enabled?: boolean;
   wan_interface?: number | null;
+  metrics_if_index?: number | null;
   ports: number;
   snmp?: 'v2c' | 'v3' | null;
   port: number;
@@ -373,6 +374,14 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
                   <option value="snmp">SNMP</option><option value="icmp">ICMP</option>
                   <option value="none">{t('disabled')}</option>
                 </select></label>
+                {device.monitor_mode === 'snmp' && <label>{t('ownMetricsPort')}
+                  <input type="number" min="1" max="2147483647" step="1" list="metrics-interfaces"
+                    placeholder="ifIndex" value={device.metrics_if_index ?? ''}
+                    onChange={event => patch({ metrics_if_index: event.target.value ? event.target.valueAsNumber : null })} />
+                  <datalist id="metrics-interfaces">{interfaceOptions(observed, device).map(port => (
+                    <option key={port.index} value={port.index}>{port.name}</option>
+                  ))}</datalist>
+                </label>}
                 {device.monitor_mode === 'snmp' && <label>{t('version')}<select value={device.snmp ?? ''} onChange={event => patch({ snmp: event.target.value as Device['snmp'] || null })}>
                   <option value="v2c">SNMP v2c</option><option value="v3">SNMP v3</option>
                 </select></label>}

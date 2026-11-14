@@ -62,11 +62,19 @@ export function buildTopology(devices: Device[], samples: Map<string, Sample>,
     const { id, name, ip, kind, parent_id } = device;
     const parent = parent_id === null ? undefined : byId.get(parent_id);
     const sample = samples.get(id);
-    const rates = mock ? mockRates(device, now) : liveRates(device, parent, ports, Boolean(sample));
+    const ownIndex = device.monitor_mode === 'snmp' ? device.metrics_if_index : null;
+    const ownPort = ownIndex == null ? undefined : ports.get(id)?.get(ownIndex);
+    const rates: Rates = mock ? mockRates(device, now)
+      : ownIndex == null ? liveRates(device, parent, ports, Boolean(sample))
+      : {
+        down_bps: ownPort?.rx_bps ?? null,
+        up_bps: ownPort?.tx_bps ?? null,
+        status: ownPort ? ownPort.up ? 'online' : 'offline' : sample ? 'unknown' : 'offline',
+      };
     const host = mock ? { cpu_percent: Math.round(220 + 80 * Math.sin(now / 9)) / 10, ram_percent: 48.2, uptime_seconds: 2_073_600 + Math.floor(now) }
       : sample ? { ...hostMetrics(sample), uptime_seconds: sample.uptime == null ? null : Math.floor(sample.uptime / 100) } : null;
-    const index = kind === 'firewall' ? device.wan_interface : parent?.interface_map[id];
-    const portSample = kind === 'firewall' ? sample : parent ? samples.get(parent.id) : undefined;
+    const index = ownIndex ?? (kind === 'firewall' ? device.wan_interface : parent?.interface_map[id]);
+    const portSample = ownIndex != null || kind === 'firewall' ? sample : parent ? samples.get(parent.id) : undefined;
     const speed = index == null ? undefined : portSample?.tables.speed?.get(String(index));
     const capacity = typeof speed === 'number' && speed > 0 ? speed * 1e6 : null;
     const monitoredStatus = unconfigured.has(id) ? 'unconfigured' : !mock && device.enabled && device.monitor_mode === 'icmp'
@@ -74,10 +82,11 @@ export function buildTopology(devices: Device[], samples: Map<string, Sample>,
       : !device.enabled ? 'unknown' : rates.status;
     const status = device.monitor_mode !== 'icmp' && capacity && monitoredStatus === 'online' &&
       Math.max(rates.down_bps ?? 0, rates.up_bps ?? 0) > capacity * 0.75 ? 'warning' : monitoredStatus;
-    const port = index == null ? undefined : ports.get(kind === 'firewall' ? id : parent?.id ?? '')?.get(index);
+    const portName = index == null ? undefined : portSample?.tables.name?.get(String(index))
+      ?? ports.get(ownIndex != null || kind === 'firewall' ? id : parent?.id ?? '')?.get(index)?.name;
     return {
       id, name, ip, kind, parent_id, ...rates, status,
-      uplink: index == null ? null : { index, name: port?.name ?? null, capacity_bps: capacity },
+      uplink: index == null ? null : { index, name: typeof portName === 'string' ? portName : null, capacity_bps: capacity },
       interfaces: [...(ports.get(id)?.values() ?? [])],
       neighbors: [...(sample?.tables.lldp?.values() ?? [])].filter(value => typeof value === 'string'),
       host: kind === 'firewall' ? host : null,
@@ -85,10 +94,16 @@ export function buildTopology(devices: Device[], samples: Map<string, Sample>,
   });
   const firewall = nodes.find(node => node.kind === 'firewall');
   const wan = nodes.find(node => node.kind === 'wan' && node.id === firewall?.parent_id);
-  if (!mock && wan && firewall) {
-    wan.down_bps = firewall.down_bps;
-    wan.up_bps = firewall.up_bps;
-    wan.status = firewall.status;
+  const firewallDevice = firewall && byId.get(firewall.id);
+  // The Internet summary still measures the WAN when the firewall card uses another interface.
+  const internet = !mock && firewallDevice?.monitor_mode === 'snmp' && firewallDevice.metrics_if_index != null
+    ? { ...liveRates(firewallDevice, undefined, ports, samples.has(firewallDevice.id)),
+      ...(unconfigured.has(firewallDevice.id) ? { status: 'unconfigured' as const } : {}) }
+    : firewall;
+  if (!mock && wan && internet) {
+    wan.down_bps = internet.down_bps;
+    wan.up_bps = internet.up_bps;
+    wan.status = internet.status;
   }
   const withHistory = nodes.map(node => {
     let points = history.get(node.id) ?? [];
@@ -110,8 +125,8 @@ export function buildTopology(devices: Device[], samples: Map<string, Sample>,
         : interfaces.filter(port => port.up).length,
       ports_total: mock ? devices.reduce((sum, device) => sum + (MOCK_PORTS_UP.has(device.id) ? device.ports : 0), 0)
         : interfaces.length,
-      down_bps: firewall?.down_bps ?? null,
-      up_bps: firewall?.up_bps ?? null,
+      down_bps: internet?.down_bps ?? null,
+      up_bps: internet?.up_bps ?? null,
       speedtest: mock ? MOCK_SPEEDTEST : speedtest,
     },
   };

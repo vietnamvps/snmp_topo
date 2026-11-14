@@ -100,6 +100,7 @@
   "root": "None · Root device",
   "parentPort": "Port on parent device",
   "portHint": "Select a port discovered via SNMP or enter its ifIndex.",
+  "ownMetricsPort": "Own metrics port (ifIndex)",
   "wanPort": "Firewall WAN port",
   "version": "Version",
   "disabled": "Disabled",

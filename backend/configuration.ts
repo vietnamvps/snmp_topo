@@ -21,6 +21,7 @@ export const deviceSchema = z.object({
   parent_id: idSchema.nullish().transform(value => value ?? null),
   parent_if_index: ifIndex.nullish().transform(value => value ?? null),
   interface_map: z.record(idSchema, ifIndex).default({}),
+  metrics_if_index: z.number().int().min(1).max(2147483647).nullish().transform(value => value ?? null),
   wan_interface: ifIndex.nullish().transform(value => value ?? null),
   ports: z.coerce.number().int().positive().default(1),
   monitor_mode: z.enum(['snmp', 'icmp', 'none']).optional(),

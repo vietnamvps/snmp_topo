@@ -39,7 +39,7 @@ test('SQLite device seed, audit, ICMP topology and admin-only CRUD', async () =>
     accounts.devices.seed();
     await writeFile(seedPath, 'invalid YAML for later startups');
     accounts.devices.seed();
-    assert.equal(accounts.db.pragma('user_version', { simple: true }), 3);
+    assert.equal(accounts.db.pragma('user_version', { simple: true }), 4);
     const devices = accounts.devices.read();
     assert.equal(devices.find(device => device.id === 'switch').interface_map.camera, 3);
     const camera = devices.find(device => device.id === 'camera');
@@ -75,17 +75,24 @@ test('SQLite device seed, audit, ICMP topology and admin-only CRUD', async () =>
     assert.equal((await request('/switch', 'PATCH', { parent_id: 'camera' })).status, 400);
     assert.equal((await request('/switch', 'PATCH', { community_env: 'ADMIN_PASSWORD' })).status, 400);
     assert.equal((await request('/switch', 'DELETE')).status, 400);
+    for (const invalid of [0, -1, 1.5, true]) {
+      assert.equal((await request('/switch', 'PATCH', { metrics_if_index: invalid })).status, 400);
+    }
+    assert.equal((await request('/switch', 'PATCH', { metrics_if_index: 7 })).status, 200);
     const exported = await (await request('/export')).text();
+    assert.match(exported, /metrics_if_index: 7/);
     assert.doesNotMatch(exported, /fictional-secret|interface_map/);
     assert.match(exported, /parent_if_index: 3/);
-    const preview = await request('/import?dryRun=true', 'POST', exported.replace('name: Camera', 'name: Updated'), admin, 'application/yaml');
+    const preview = await request('/import?dryRun=true', 'POST', exported.replace('metrics_if_index: 7', 'metrics_if_index: 8').replace('name: Camera', 'name: Updated'), admin, 'application/yaml');
     assert.equal(preview.status, 200);
-    assert.equal((await preview.json()).changes[0].action, 'update');
-    assert.equal(reloads, 0);
+    const previewChanges = (await preview.json()).changes;
+    assert.equal(previewChanges.find(change => change.id === 'camera').action, 'update');
+    assert.equal(previewChanges.find(change => change.id === 'switch').after.metrics_if_index, 8);
+    assert.equal(reloads, 1);
     const edited = await request('/camera', 'PATCH', { name: 'Updated' });
     assert.equal(edited.status, 200);
     assert.equal((await edited.json()).devices.find(device => device.id === 'camera').parent_if_index, 3);
-    assert.equal(reloads, 1);
+    assert.equal(reloads, 2);
     assert.equal((await request('/switch', 'PATCH', { community }, viewer)).status, 403);
     assert.equal((await request('/switch', 'PATCH', { community: '' })).status, 400);
     assert.equal((await request('/switch', 'PATCH', { community })).status, 200);
@@ -143,4 +150,34 @@ test('AES-GCM uses random IVs and binds device and field', () => {
   assert.equal(decryptSecret(key, 'switch', 'community', first), value);
   assert.throws(() => decryptSecret(key, 'camera', 'community', first));
   assert.throws(() => decryptSecret(key, 'switch', 'auth_key', first));
+});
+
+test('own SNMP port drives node rates, metadata and sparkline with or without parent telemetry', () => {
+  const parent = { id: 'parent', kind: 'switch', parent_id: null, interface_map: { child: 3 } };
+  const child = { id: 'child', kind: 'server', enabled: true, parent_id: 'parent', monitor_mode: 'snmp', metrics_if_index: 7 };
+  function sample(index, timestamp, rx, tx, name) {
+    return { timestamp, tables: {
+      status: new Map([[index, 1]]), rx: new Map([[index, rx]]), tx: new Map([[index, tx]]),
+      name: new Map([[index, name]]), speed: new Map([[index, 1000]]),
+    } };
+  }
+  const current = new Map([['child', sample('7', 2000, 210n, 120n, 'vmnic0')]]);
+  const previous = new Map([['child', sample('7', 1000, 10n, 20n, 'vmnic0')]]);
+  const render = device => buildTopology([parent, device], current, previous, false, null, new Map(), true).devices[1];
+  function checkOwn() {
+    const node = render(child);
+    assert.equal(node.down_bps, 1600);
+    assert.equal(node.up_bps, 800);
+    assert.deepEqual(node.uplink, { index: 7, name: 'vmnic0', capacity_bps: 1e9 });
+    assert.deepEqual(node.traffic_history, [2400]);
+  }
+  checkOwn();
+  current.set('parent', sample('3', 2000, 510n, 320n, 'vmx3'));
+  previous.set('parent', sample('3', 1000, 10n, 20n, 'vmx3'));
+  checkOwn();
+  const legacy = render({ ...child, metrics_if_index: null });
+  assert.equal(legacy.down_bps, 2400);
+  assert.equal(legacy.up_bps, 4000);
+  assert.equal(legacy.uplink.name, 'vmx3');
+  assert.equal(render({ ...child, metrics_if_index: 8 }).down_bps, null);
 });

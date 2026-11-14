@@ -38,7 +38,7 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
   db.exec('BEGIN IMMEDIATE');
   try {
     const version = Number(db.pragma('user_version', { simple: true }));
-    if (version > 3) throw new Error('Account database schema is newer than this application');
+    if (version > 4) throw new Error('Account database schema is newer than this application');
     if (version === 0) db.exec(`
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -59,6 +59,11 @@ export function openAccounts(file = resolve(projectRoot, process.env.DATABASE_FI
     `);
     if (version < 2) migrateDevices(db);
     if (version < 3) migrateSecrets(db);
+    if (version < 4) db.exec(`
+      ALTER TABLE devices ADD COLUMN metrics_if_index INTEGER
+        CHECK (metrics_if_index IS NULL OR (metrics_if_index BETWEEN 1 AND 2147483647 AND typeof(metrics_if_index) = 'integer'));
+      PRAGMA user_version=4;
+    `);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');

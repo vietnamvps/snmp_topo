@@ -8,7 +8,7 @@ import { deviceSchema, projectRoot, DeviceConfigError } from './configuration.js
 const legacySchema = z.object({ devices: z.array(deviceSchema).max(256) });
 export const deviceInput = deviceSchema.omit({ interface_map: true }).extend({ monitor_mode: z.enum(['snmp','icmp','none']).default('snmp') }).strict();
 export type DeviceRow = z.infer<typeof deviceInput>;
-const columns = ['id','name','ip','kind','parent_id','parent_if_index','wan_interface','ports','monitor_mode',
+const columns = ['id','name','ip','kind','parent_id','parent_if_index','wan_interface','metrics_if_index','ports','monitor_mode',
   'snmp_version','udp_port','username','auth_protocol','privacy_protocol','community_env','auth_env','privacy_env','enabled'] as const;
 
 export function migrateDevices(db: Database.Database) {
