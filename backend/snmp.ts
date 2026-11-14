@@ -19,6 +19,7 @@ type TableName = keyof typeof OIDS;
 type Table = Map<string, number | bigint | string>;
 export type Sample = {
   timestamp: number;
+  counterTimestamps?: Partial<Record<'rx' | 'tx', Map<string, number>>>;
   tables: Partial<Record<TableName, Table>>;
   uptime?: number;
 };
@@ -71,10 +72,11 @@ export async function probeSnmp(device: Device, credentials: Credentials) {
   }
 }
 
-function walk(session: snmp.Session, oid: string): Promise<Table> {
+function walk(session: snmp.Session, oid: string, timestamps?: Map<string, number>): Promise<Table> {
   return new Promise((resolve, reject) => {
     const rows: Table = new Map();
     session.subtree(oid, 20, bindings => {
+      const receivedAt = performance.now();
       for (const binding of bindings) {
         if (snmp.isVarbindError(binding)) continue;
         const index = binding.oid.slice(oid.length + 1);
@@ -84,6 +86,7 @@ function walk(session: snmp.Session, oid: string): Promise<Table> {
             let counter = 0n;
             for (const byte of value) counter = (counter << 8n) | BigInt(byte);
             rows.set(index, counter);
+            timestamps?.set(index, receivedAt);
           } else {
             rows.set(index, value.toString('utf8'));
           }
@@ -104,25 +107,33 @@ export async function pollSnmp(device: Device, metadata: boolean, credentials: C
     const names: TableName[] = ['status', 'rx', 'tx', 'discontinuity', 'speed'];
     if (metadata) names.push('name', 'lldp');
     if (device.kind === 'firewall') names.push('cpu', 'storageType', 'storageSize', 'storageUsed');
-    const results = await Promise.allSettled(names.map(name => walk(session, OIDS[name])));
+    const counterTimestamps = { rx: new Map<string, number>(), tx: new Map<string, number>() };
+    const results = await Promise.allSettled(names.map(name => walk(session, OIDS[name],
+      name === 'rx' || name === 'tx' ? counterTimestamps[name] : undefined)));
     const tables: Sample['tables'] = {};
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') tables[names[index]] = result.value;
     });
-    return { timestamp: performance.now(), tables, uptime };
+    return { timestamp: performance.now(), tables, uptime, counterTimestamps };
   } finally {
     session.close();
   }
 }
 
 export function counterRate(current: Sample, previous: Sample | undefined, direction: 'rx' | 'tx', index: string) {
-  if (!previous || current.timestamp <= previous.timestamp) return null;
+  if (!previous) return null;
+  const currentTime = current.counterTimestamps?.[direction]?.get(index) ?? current.timestamp;
+  const previousTime = previous.counterTimestamps?.[direction]?.get(index) ?? previous.timestamp;
+  const elapsedMs = currentTime - previousTime;
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) return null;
   if (current.uptime !== undefined && previous.uptime !== undefined && current.uptime < previous.uptime) return null;
   if (current.tables.discontinuity?.get(index) !== previous.tables.discontinuity?.get(index)) return null;
   const newest = current.tables[direction]?.get(index);
   const oldest = previous.tables[direction]?.get(index);
   if (typeof newest !== 'bigint' || typeof oldest !== 'bigint') return null;
-  return Number(BigInt.asUintN(64, newest - oldest)) * 8000 / (current.timestamp - previous.timestamp);
+  // Treat a decrease as a reset even if the agent omits the discontinuity marker.
+  if (newest < oldest) return null;
+  return Number(newest - oldest) * 8000 / elapsedMs;
 }
 
 export function hostMetrics({ tables }: Sample) {
