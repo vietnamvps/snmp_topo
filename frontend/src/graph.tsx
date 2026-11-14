@@ -6,6 +6,8 @@ import type { Edge, EdgeProps, InternalNode, Node, NodeProps } from '@xyflow/rea
 import { Camera, Database, Globe2, House, Minus, Network, Plus, Router, Server, Shield, Wifi } from 'lucide-react';
 import type { Device, Kind } from './data';
 import { rate } from './data';
+import { trafficMotion } from './traffic-motion';
+import type { CSSProperties } from 'react';
 
 const kinds = {
   wan: Globe2,
@@ -156,13 +158,14 @@ export const TrafficEdge = memo(function TrafficEdge({ id, source, target, marke
     ...anchors,
     curvature: 0.22,
   });
-  const active = (device.down_bps ?? 0) + (device.up_bps ?? 0) > 100_000;
+  const motion = trafficMotion(device.status, device.down_bps, device.up_bps);
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} className={`traffic-line ${device.status} ${trunk ? 'trunk' : ''} ${highlighted ? 'highlighted' : ''}${dimmed}`} />
       <circle cx={anchors.sourceX} cy={anchors.sourceY} r={3} className={`traffic-anchor${dimmed}`} />
       <circle cx={anchors.targetX} cy={anchors.targetY} r={3} className={`traffic-anchor${dimmed}`} />
-      {active && <path d={path} className={`traffic-particles${dimmed}`} />}
+      {motion && <path d={path} className={`traffic-particles${dimmed}`}
+        style={{ '--traffic-duration': motion.duration + 's', animationDirection: motion.direction } as CSSProperties} />}
       {labels && (!dragged || source === dragged || target === dragged) && <EdgeLabelRenderer>
         <div className={`edge-label${dimmed}`} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>
           <span className="down">↓ {rate(device.down_bps, true)}</span>
