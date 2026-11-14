@@ -5,7 +5,7 @@ import { BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, getBezierPat
 import type { Edge, EdgeProps, InternalNode, Node, NodeProps } from '@xyflow/react';
 import { Camera, Database, Globe2, House, Minus, Network, Plus, Router, Server, Shield, Wifi } from 'lucide-react';
 import type { Device, Kind } from './data';
-import { rate } from './data';
+import { linkCapacity, rate } from './data';
 import { trafficBps, PARTICLE_MODE } from './traffic-motion';
 import { TrafficParticles } from './traffic-particles';
 
@@ -88,8 +88,8 @@ export const DeviceCard = memo(function DeviceCard({ id, data }: NodeProps<Topol
       </div>
       <div className="device-meta">
         <span title={device.ip}>{device.ip}</span>
-        <span title={device.uplink ? (device.uplink.name ?? 'ifIndex ' + device.uplink.index) + (device.uplink.capacity_bps ? ' · ' + rate(device.uplink.capacity_bps) : '') : undefined}>
-          {device.uplink ? '↥ ' + (device.uplink.name ?? '#' + device.uplink.index) + (device.uplink.capacity_bps ? ' · ' + rate(device.uplink.capacity_bps) : '') : '↥ —'}
+        <span title={device.uplink ? (device.uplink.name ?? 'ifIndex ' + device.uplink.index) + (device.uplink.capacity_bps ? ' · ' + linkCapacity(device.uplink.capacity_bps) : '') : undefined}>
+          {device.uplink ? '↥ ' + (device.uplink.name ?? '#' + device.uplink.index) + (device.uplink.capacity_bps ? ' · ' + linkCapacity(device.uplink.capacity_bps) : '') : '↥ —'}
         </span>
       </div>
       <div className="device-rates">
@@ -177,8 +177,8 @@ export const TrafficEdge = memo(function TrafficEdge({ id, source, target, marke
       </g>
       {labels && (!dragged || source === dragged || target === dragged) && <EdgeLabelRenderer>
         <div className={`edge-label${dimmed}`} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>
-          <span className="down">↓ {rate(device.down_bps, true)}</span>
-          <span className="up">↑ {rate(device.up_bps, true)}</span>
+          <span className="down">↓ {rate(device.down_bps)}</span>
+          <span className="up">↑ {rate(device.up_bps)}</span>
         </div>
       </EdgeLabelRenderer>}
     </>

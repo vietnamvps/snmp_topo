@@ -28,10 +28,17 @@ export type Snapshot = {
   };
 };
 
-export function rate(bps: number | null | undefined, compact = false): string {
-  if (bps == null) return '—';
+export function linkCapacity(bps: number): string {
   const unit = bps >= 1e6 ? 'Mbps' : 'Kbps';
-  return `${(bps / (unit === 'Mbps' ? 1e6 : 1e3)).toFixed(compact ? 0 : 1)} ${unit}`;
+  return `${(bps / (unit === 'Mbps' ? 1e6 : 1e3)).toFixed(1)} ${unit}`;
+}
+
+export function rate(bps: number | null | undefined): string {
+  if (bps == null) return '—';
+  const bytesPerSecond = bps / 8;
+  const megabytes = bytesPerSecond >= 1e6;
+  const value = bytesPerSecond / (megabytes ? 1e6 : 1e3);
+  return `${value.toFixed(value > 0 && value < 1 ? 2 : 1)} ${megabytes ? 'MB/s' : 'KB/s'}`;
 }
 
 export function useTopology() {
