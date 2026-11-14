@@ -121,6 +121,9 @@ test('SQLite device seed, audit, ICMP topology and admin-only CRUD', async () =>
       snmp: 'v3', username: 'test', auth_key: community, priv_key: community };
     assert.equal((await request('', 'POST', extra)).status, 201);
     assert.equal(secrets.flags(extra.id).has_auth_key, true);
+    assert.equal((await request('/' + extra.id, 'PATCH', { name: 'Renamed' })).status, 200);
+    assert.deepEqual(secrets.resolveCredentials(accounts.devices.read().find(item => item.id === extra.id)),
+      { auth_key: community, priv_key: community });
     for (const [field, untouched] of [['auth_key', 'priv_key'], ['priv_key', 'auth_key']]) {
       assert.equal((await request('/' + extra.id, 'PATCH', { [untouched]: community })).status, 200);
       const cleared = await request('/' + extra.id, 'PATCH', { [field]: null });

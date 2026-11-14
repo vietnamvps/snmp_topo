@@ -27,10 +27,10 @@ type Device = {
   snmp?: 'v2c' | 'v3' | null;
   port: number;
   username?: string | null;
-  community_env: string;
-  auth_env: string;
+  community_env?: string;
+  auth_env?: string;
   auth_protocol?: 'sha' | 'sha256' | 'sha512';
-  privacy_env: string;
+  privacy_env?: string;
   privacy_protocol?: 'aes' | 'aes256b' | 'aes256r';
 };
 
@@ -80,8 +80,7 @@ function translationError(value: string, fallback: TranslationKey): TranslationK
 function newDevice(parent_id: string | null): Device {
   return {
     id: 'node-' + Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, '0')).join(''), name: '', ip: '', kind: 'switch', parent_id, monitor_mode: 'icmp',
-    ports: 1, port: 161, community_env: 'SNMP_COMMUNITY',
-    auth_env: 'SNMP_V3_AUTH_KEY', privacy_env: 'SNMP_V3_PRIV_KEY',
+    ports: 1, port: 161, auth_protocol: 'sha', privacy_protocol: 'aes',
   };
 }
 
@@ -244,7 +243,7 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
   async function save(event: FormEvent) {
     event.preventDefault();
     if (busy || !dirty || !device) return;
-    const { id, interface_map: _map, has_community, has_auth_key, has_priv_key, ...fields } = device;
+    const { id, interface_map: _map, has_community, has_auth_key, has_priv_key, community_env, auth_env, privacy_env, ...fields } = device;
     const exists = savedIds.includes(id);
     await persist(() => requestConfig({
       method: exists ? 'PATCH' : 'POST', headers, body: JSON.stringify({ ...(exists ? fields : { id, ...fields }), ...secretDraft }),
@@ -388,22 +387,18 @@ export function DeviceSettings({ nodeId, mode, parentId, onSaved, onStateChange 
                 {device.monitor_mode === 'snmp' && device.snmp && <label>{t('udpPort')}<input type="number" min="1" max="65535" required value={device.port || ''}
                   onChange={event => patch({ port: Number(event.target.value) })} /></label>}
                 {device.monitor_mode === 'snmp' && device.snmp === 'v2c' && secretInput('community')}
-                {device.monitor_mode === 'snmp' && device.snmp === 'v2c' && <label>{t('communityVar')}<input value={device.community_env}
-                  onChange={event => patch({ community_env: event.target.value })} /></label>}
                 {device.monitor_mode === 'snmp' && device.snmp === 'v3' && <>
-                  {secretInput('auth_key')}
-                  {secretInput('priv_key')}
-                  <label>{t('username')}<input required value={device.username ?? ''} onChange={event => patch({ username: event.target.value })} /></label>
+                  <label className="config-field-wide">{t('username')}<input required value={device.username ?? ''} onChange={event => patch({ username: event.target.value })} /></label>
                   <label>{t('authAlgorithm')}<select value={device.auth_protocol ?? 'sha256'}
                     onChange={event => patch({ auth_protocol: event.target.value as 'sha' | 'sha256' | 'sha512' })}>
-                    <option value="sha256">SHA-256</option><option value="sha512">SHA-512</option><option value="sha">SHA-1</option>
-                  </select></label>
-                  <label>{t('authVar')}<input value={device.auth_env} onChange={event => patch({ auth_env: event.target.value })} /></label>
+                    <option value="sha">SHA-1</option><option value="sha256">SHA-256</option><option value="sha512">SHA-512</option>
+                  </select><small>{t('snmpAlgorithmHint')}</small></label>
+                  {secretInput('auth_key')}
                   <label>{t('privacyAlgorithm')}<select value={device.privacy_protocol ?? 'aes'}
                     onChange={event => patch({ privacy_protocol: event.target.value as Device['privacy_protocol'] })}>
                     <option value="aes">AES-128</option><option value="aes256b">AES-256 Blumenthal</option><option value="aes256r">AES-256 Reeder</option>
-                  </select></label>
-                  <label>{t('privacyVar')}<input value={device.privacy_env} onChange={event => patch({ privacy_env: event.target.value })} /></label>
+                  </select><small>{t('snmpAlgorithmHint')}</small></label>
+                  {secretInput('priv_key')}
                 </>}
               </div>
               {device.monitor_mode === 'snmp' && insecurePage && <p className="config-error" role="alert">{t('secretHttpWarning')}</p>}
