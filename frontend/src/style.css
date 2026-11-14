@@ -92,7 +92,7 @@ main { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .device-meta { flex-wrap: nowrap; justify-content: space-between; }
 .device-meta span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .device-rates { justify-content: space-between; align-items: center; padding-top: 4px; }
-.device-rates span { display: block; line-height: 1.25; }
+.device-rates > div > span { display: block; line-height: 1.25; }
 .blade-spark { width: 74px; height: 26px; }
 .spark-grid { stroke: #253348; fill: none; }
 .spark-line { stroke: #22d3ee; stroke-width: 1.5; fill: none; }

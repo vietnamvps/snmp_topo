@@ -5,7 +5,8 @@ import { BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, getBezierPat
 import type { Edge, EdgeProps, InternalNode, Node, NodeProps } from '@xyflow/react';
 import { Camera, Database, Globe2, House, Minus, Network, Plus, Router, Server, Shield, Wifi } from 'lucide-react';
 import type { Device, Kind } from './data';
-import { linkCapacity, rate } from './data';
+import { linkCapacity } from './data';
+import { TrafficHistoryPath, TrafficRate } from './traffic-display';
 import { trafficBps, PARTICLE_MODE } from './traffic-motion';
 import { TrafficParticles } from './traffic-particles';
 
@@ -37,20 +38,9 @@ export const bladeHeight = 118;
 
 function Sparkline({ history }: { history: (number | null)[] }) {
   const { t } = useLanguage();
-  const scale = Math.max(1, ...history.map(value => value ?? 0));
-  let penDown = false;
-  const path = history.map((value, i) => {
-    if (value == null) {
-      penDown = false;
-      return '';
-    }
-    const command = penDown ? 'L' : 'M';
-    penDown = true;
-    return command + ((15 - history.length + i) * 5 + 2) + ' ' + (23 - 20 * value / scale);
-  }).join(' ');
   return <svg className="blade-spark" viewBox="0 0 74 26" role="img" aria-label={t('sparkline')}>
     <path d="M2 23H72 M2 13H72 M2 3H72" className="spark-grid" />
-    <path d={path} className="spark-line" />
+    <TrafficHistoryPath history={history} />
   </svg>;
 }
 
@@ -93,8 +83,8 @@ export const DeviceCard = memo(function DeviceCard({ id, data }: NodeProps<Topol
         </span>
       </div>
       <div className="device-rates">
-        <div><span className="down">▼ {rate(device.down_bps)}</span>
-          <span className="up">▲ {rate(device.up_bps)}</span></div>
+        <div><span className="down">▼ <TrafficRate bps={device.down_bps} /></span>
+          <span className="up">▲ <TrafficRate bps={device.up_bps} /></span></div>
         <Sparkline history={device.traffic_history ?? []} />
       </div>
       {children > 0 && <button className="branch nodrag nopan" type="button" onClick={event => { event.stopPropagation(); toggle(device.id); }}
@@ -177,8 +167,8 @@ export const TrafficEdge = memo(function TrafficEdge({ id, source, target, marke
       </g>
       {labels && (!dragged || source === dragged || target === dragged) && <EdgeLabelRenderer>
         <div className={`edge-label${dimmed}`} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>
-          <span className="down">↓ {rate(device.down_bps)}</span>
-          <span className="up">↑ {rate(device.up_bps)}</span>
+          <span className="down">↓ <TrafficRate bps={device.down_bps} /></span>
+          <span className="up">↑ <TrafficRate bps={device.up_bps} /></span>
         </div>
       </EdgeLabelRenderer>}
     </>

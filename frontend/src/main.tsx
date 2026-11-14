@@ -6,7 +6,8 @@ import { Background, BackgroundVariant, ReactFlow, ReactFlowProvider, ViewportPo
 import { Download, Eye, EyeOff, Focus, Lock, Maximize, Minus, Network, Plus, RefreshCw, Search, Settings, Unlock, Upload, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { DeviceSettings } from './device-settings';
-import { rate, useTopology } from './data';
+import { useTopology } from './data';
+import { TrafficRate } from './traffic-display';
 import { ContextMenu, type MenuItem } from './context-menu';
 import type { Device, Snapshot } from './data';
 import { DeviceCard, TrafficEdge, makeGraph, TopologyHoverContext, EdgeTelemetryContext } from './graph';
@@ -42,9 +43,9 @@ function SystemBar({ snapshot, connected }: { snapshot?: Snapshot; connected: bo
   const telemetry = [
     [t('cpu'), percent(host?.cpu_percent)], [t('ram'), percent(host?.ram_percent)], [t('uptime'), uptime(host?.uptime_seconds)],
     [t('activePorts'), summary ? summary.ports_up + ' / ' + summary.ports_total : '—'],
-    [t('rx'), rate(summary?.down_bps)], [t('tx'), rate(summary?.up_bps)],
+    [t('rx'), <TrafficRate bps={summary?.down_bps} />], [t('tx'), <TrafficRate bps={summary?.up_bps} />],
     [t('latency'), summary?.speedtest ? summary.speedtest.ping_ms + ' ms' : '—'],
-  ];
+  ] as const;
   return <header className="command-bar">
     <div className="command-brand"><Network size={20} /><h1>OPNsense NOC</h1>
       <span className={connected ? 'stream-state streaming' : 'stream-state'}>{snapshot?.mock ? t('mock') : connected ? t('live') : t('rest')}</span>
