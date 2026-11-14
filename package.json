@@ -37,6 +37,7 @@
     "@types/node": "^26.0.0",
     "@types/ping": "^0.4.4",
     "@types/ws": "^8.18.0",
+    "jsdom": "^31.0.1",
     "typescript": "~5.8.3"
   }
 }

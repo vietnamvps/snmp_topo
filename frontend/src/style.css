@@ -54,8 +54,8 @@ main { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .traffic-line { stroke: #256777; stroke-width: 1.5; }
 .traffic-line.offline { stroke: #8f373f; stroke-dasharray: 4 5; }
 .traffic-line.unknown { stroke: #475569; stroke-dasharray: 4 5; }
-.traffic-particles { pointer-events: none; fill: none; stroke: #5eead4; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 1 15; animation: var(--traffic-duration, 1.1s) linear infinite traffic; }
-@keyframes traffic { to { stroke-dashoffset: -32; } }
+.traffic-particles { pointer-events: none; fill: #5eead4; filter: drop-shadow(0 0 2px #5eead477); }
+.traffic-particles-upload { fill: #fb923c; filter: drop-shadow(0 0 2px #fb923c77); }
 .edge-label { position: absolute; display: flex; gap: 6px; padding: 3px 6px; color: #d1e8f5; border: 1px solid #244655; border-radius: 6px; background: #0d1824; font: 600 9px ui-monospace, monospace; white-space: nowrap; }
 .legend, .search-box, .canvas-message { position: absolute; z-index: 5; background: #111b29; border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; color: var(--muted); font-size: 11px; }
 .legend { bottom: 14px; left: 16px; display: flex; gap: 13px; pointer-events: none; }
@@ -69,7 +69,6 @@ main { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 @media (max-width: 760px) {
   .summary { order: 2; width: 100%; }
 }
-@media (prefers-reduced-motion: reduce) { .traffic-particles { animation: none; display: none; } }
 
 .command-bar { display: flex; min-height: 56px; align-items: center; gap: 16px; padding: 6px 16px; background: #0c1321; border-bottom: 1px solid #253348; }
 .command-brand { display: flex; align-items: center; gap: 8px; white-space: nowrap; color: #d4e8ff; }

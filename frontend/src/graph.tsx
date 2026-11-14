@@ -6,8 +6,8 @@ import type { Edge, EdgeProps, InternalNode, Node, NodeProps } from '@xyflow/rea
 import { Camera, Database, Globe2, House, Minus, Network, Plus, Router, Server, Shield, Wifi } from 'lucide-react';
 import type { Device, Kind } from './data';
 import { rate } from './data';
-import { trafficMotion } from './traffic-motion';
-import type { CSSProperties } from 'react';
+import { trafficBps, PARTICLE_MODE } from './traffic-motion';
+import { TrafficParticles } from './traffic-particles';
 
 const kinds = {
   wan: Globe2,
@@ -145,12 +145,16 @@ function smartAnchors(source: InternalNode<TopologyNode>, target: InternalNode<T
   };
 }
 
+export const EdgeTelemetryContext = createContext<ReadonlyMap<string, Device>>(new Map());
+
 export const TrafficEdge = memo(function TrafficEdge({ id, source, target, markerEnd, data }: EdgeProps<TopologyEdge>) {
   const { focused, dragged } = useContext(TopologyHoverContext);
+  const telemetry = useContext(EdgeTelemetryContext);
   const sourceNode = useInternalNode<TopologyNode>(source);
   const targetNode = useInternalNode<TopologyNode>(target);
   if (!data || !sourceNode || !targetNode) return null;
-  const { device, labels, trunk } = data;
+  const { labels, trunk } = data;
+  const device = telemetry.get(target) ?? data.device;
   const highlighted = source === focused || target === focused;
   const dimmed = focused && !highlighted ? ' topology-muted' : '';
   const anchors = smartAnchors(sourceNode, targetNode);
@@ -158,14 +162,18 @@ export const TrafficEdge = memo(function TrafficEdge({ id, source, target, marke
     ...anchors,
     curvature: 0.22,
   });
-  const motion = trafficMotion(device.status, device.down_bps, device.up_bps);
+  const dual = PARTICLE_MODE === 'dual';
+  const bps = trafficBps(device.status, device.down_bps, device.up_bps);
+  const upload = dual ? trafficBps(device.status, null, device.up_bps) : null;
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} className={`traffic-line ${device.status} ${trunk ? 'trunk' : ''} ${highlighted ? 'highlighted' : ''}${dimmed}`} />
       <circle cx={anchors.sourceX} cy={anchors.sourceY} r={3} className={`traffic-anchor${dimmed}`} />
       <circle cx={anchors.targetX} cy={anchors.targetY} r={3} className={`traffic-anchor${dimmed}`} />
-      {motion && <path d={path} className={`traffic-particles${dimmed}`}
-        style={{ '--traffic-duration': motion.duration + 's', animationDirection: motion.direction } as CSSProperties} />}
+      <g className={dimmed ? 'topology-muted' : undefined}>
+        {bps !== null && <TrafficParticles id={id} path={path} bps={bps} />}
+        {upload !== null && <TrafficParticles id={id + ':upload'} path={path} bps={upload} upload />}
+      </g>
       {labels && (!dragged || source === dragged || target === dragged) && <EdgeLabelRenderer>
         <div className={`edge-label${dimmed}`} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>
           <span className="down">↓ {rate(device.down_bps, true)}</span>

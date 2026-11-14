@@ -9,7 +9,7 @@ import { DeviceSettings } from './device-settings';
 import { rate, useTopology } from './data';
 import { ContextMenu, type MenuItem } from './context-menu';
 import type { Device, Snapshot } from './data';
-import { DeviceCard, TrafficEdge, makeGraph, TopologyHoverContext } from './graph';
+import { DeviceCard, TrafficEdge, makeGraph, TopologyHoverContext, EdgeTelemetryContext } from './graph';
 import { layoutKey, loadLayout, parseLayout, type PositionMap, type Point, type AlignmentGuide, magneticSnap, snapToCenter } from './layout';
 import { bladeHeight, bladeWidth } from './graph';
 import type { TopologyEdge, TopologyNode } from './graph';
@@ -173,9 +173,7 @@ function Dashboard() {
   const nodes = useMemo(() => placedNodes.map(node => ({
     ...node, data: { ...node.data, device: telemetry.get(node.id) ?? node.data.device },
   })), [placedNodes, telemetry]);
-  const edges = useMemo(() => graph.edges.map(edge => edge.data ? ({
-    ...edge, data: { ...edge.data, device: telemetry.get(edge.target) ?? edge.data.device },
-  }) : edge), [graph.edges, telemetry]);
+  const edges = graph.edges;
 
   const emphasis = useMemo(() => {
     const focused = [dragged, hoveredNodeId ?? undefined, selected].find(id => graph.nodes.some(node => node.id === id));
@@ -399,6 +397,7 @@ function Dashboard() {
             {query && !match && <small>{t('noMatch')}</small>}
           </form>}
           <TopologyHoverContext.Provider value={emphasis}>
+          <EdgeTelemetryContext.Provider value={telemetry}>
           <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
             onNodeContextMenu={(event, node) => {
               event.preventDefault();
@@ -481,6 +480,7 @@ function Dashboard() {
               </svg>
             </ViewportPortal>}
           </ReactFlow>
+          </EdgeTelemetryContext.Provider>
           </TopologyHoverContext.Provider>
           {!snapshot && <p className="canvas-message" role="status">{error ? t('loadError') : t('loading')}</p>}
           {snapshot && error && <p className="canvas-message" role="status">{t('stale')}</p>}
